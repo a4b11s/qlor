@@ -18,3 +18,4 @@ class Agent(nn.Module):
         x = self.flatten(x)
         x = self.actor(x)
         return nn.functional.softmax(x, dim=-1)
+    
