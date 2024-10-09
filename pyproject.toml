@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "qlor"
+version = "0.1.0"
+description = ""
+authors = ["Artem <a4b11s@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.13"
+torch = "^2.4.1"
+torchvision = "^0.19.1"
+torchaudio = "^2.4.1"
+matplotlib = "^3.9.2"
+pyqt5 = "^5.15.11"
+vizdoom = "^1.2.4"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
