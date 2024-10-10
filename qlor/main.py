@@ -48,13 +48,13 @@ target_agent.load_state_dict(agent.state_dict())
 # ε-greedy
 epsilon_start = 1.00
 epsilon_final = 0.01
-epsilon_decay = 4000
+epsilon_decay = 5000
 epsilon = epsilon_start
 gamma = 0.99
 
 batch_size = 256
 start_training_after = batch_size * 2
-target_update_frequency = 20
+target_update_frequency = 200
 
 validation_frequency = 1000
 
@@ -174,7 +174,6 @@ def continuous_training(max_steps=100_000_000):
             observation, _ = envs.reset()
 
         if step % validation_frequency == 0:
-            val_env.reset()
             val_observation, _ = val_env.reset()
 
             while True:
