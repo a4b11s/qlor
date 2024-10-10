@@ -12,14 +12,16 @@ import time
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(device)
 
-env = gymnasium.make(
+envs = gymnasium.make_vec(
     "VizdoomCorridor-v0",  # or any other environment id
-    render_mode="human",
+    num_envs=32,
+    # render_mode="human",
 )  # or any other environment id
 
-screen_shape = env.observation_space["screen"].shape
+
+screen_shape = envs.single_observation_space["screen"].shape
 screen_shape = (screen_shape[2], screen_shape[0], screen_shape[1])
-action_dim = env.action_space.n
+action_dim = envs.single_action_space.n
 
 agent = Agent(screen_shape, action_dim)
 agent.load_state_dict(torch.load("agent.pth"))
@@ -33,29 +35,32 @@ target_agent.load_state_dict(agent.state_dict())
 
 
 # ε-greedy
-epsilon_start = 0.8
+epsilon_start = 0.01
 epsilon_final = 0.01
 epsilon_decay = 500
 epsilon = epsilon_start
 gamma = 0.99
 
-batch_size = 64
+batch_size = 256
 start_training_after = batch_size * 2
 target_update_frequency = 20
 
 save_frequency = 100
 clear_experience_replay_frequency = 10
-experience_replay_maxlen = 4000
+experience_replay_maxlen = 2000
 
 experience_replay = collections.deque(maxlen=experience_replay_maxlen)
 
 
 def epsilon_greedy_action(policy, epsilon):
-    return (
-        random.randrange(action_dim)
-        if random.random() < epsilon
-        else policy.argmax().item()
-    )
+    actions = []
+    for p in policy:
+        actions.append(
+            random.randrange(action_dim)
+            if random.random() < epsilon
+            else p.argmax().item()
+        )
+    return np.array(actions)
 
 
 def update_epsilon(episode):
@@ -67,24 +72,28 @@ def update_epsilon(episode):
 
 def augment_observation(observation):
     screen = observation["screen"]
-    screen = tensor(screen, device=device).unsqueeze(0)
-    # From hwc to chw
+    screen = tensor(screen, device=device)  # bs w h c
+    # From bshwc to bschw
     screen = screen.permute(0, 3, 1, 2)
 
     return screen / 255.0
 
 
 def train_batch():
-    # batch = random.sample(experience_replay, batch_size)
-
     batch_indices = np.random.choice(len(experience_replay), batch_size, replace=False)
     batch = [experience_replay[i] for i in batch_indices]
 
     state_batch = torch.cat([experience[0] for experience in batch]).to(device)
-    action_batch = tensor([experience[1] for experience in batch], device=device)
-    reward_batch = tensor([experience[2] for experience in batch], device=device)
+    action_batch = tensor(
+        [experience[1] for experience in batch], device=device
+    ).long()  # Ensure action is long type for indexing
+    reward_batch = tensor(
+        [experience[2] for experience in batch], device=device, dtype=torch.float32
+    )  # Cast reward to float32
     next_state_batch = torch.cat([experience[3] for experience in batch]).to(device)
-    done_batch = tensor([experience[4] for experience in batch], device=device).float()
+    done_batch = tensor(
+        [experience[4] for experience in batch], device=device, dtype=torch.float32
+    )  # Cast done flag to float32
 
     # Поточні Q-значення
     policy_batch = agent(state_batch)
@@ -108,38 +117,37 @@ def train_batch():
     return loss.item()
 
 
-def episode_fn(episode):
+def episode_fn(episode, max_steps=1000):
     agent.train()
-    observation, _ = env.reset()
+    observation, _ = envs.reset()
     update_epsilon(episode)
     step = 0
-    while True:
+    while step < max_steps:
+        torch.cuda.empty_cache()
         current_state = augment_observation(observation)
         policy = agent(current_state)
-        action = epsilon_greedy_action(policy, epsilon)
+        actions = epsilon_greedy_action(policy, epsilon)
+        next_observations, rewards, terminateds, truncateds, _ = envs.step(actions)
 
-        next_observation, reward, terminated, truncated, _ = env.step(action)
-
-        experience_replay.append(
-            (
-                current_state,
-                action,
-                reward,
-                augment_observation(next_observation),
-                terminated or truncated,
+        for i in range(envs.num_envs):
+            experience_replay.append(
+                (
+                    current_state[i].unsqueeze(0).cpu(),  # Single environment state
+                    actions[i],
+                    rewards[i],
+                    augment_observation(next_observations)[i].unsqueeze(0).cpu(),
+                    terminateds[i] or truncateds[i],
+                )
             )
-        )
-
-        if terminated or truncated:
-            break
 
         if len(experience_replay) > start_training_after and step % 4 == 0:
             loss = train_batch()
-            torch.cuda.empty_cache()
 
-        observation = next_observation
+        observation = next_observations
         step += 1
 
+        if np.all(terminateds) or np.all(truncateds):
+            break
     if episode % target_update_frequency == 0:
         target_agent.load_state_dict(agent.state_dict())
 
