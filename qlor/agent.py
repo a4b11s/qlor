@@ -12,6 +12,8 @@ class Agent(nn.Module):
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
             nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=3, stride=1),
+            nn.ReLU(),
         )
         self.flatten = nn.Flatten()
         conv_out_size = self._get_conv_out(input_shape)

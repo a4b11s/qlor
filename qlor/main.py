@@ -1,88 +1,165 @@
 import gymnasium
+import numpy as np
 from vizdoom import gymnasium_wrapper  # This import will register all the environments
 from qlor.agent import Agent
 from torch import nn, optim, tensor
 import torch
-
+import random
+import collections
+import math
+import time
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(device)
 
-env = gymnasium.make("VizdoomBasic-v0")  # or any other environment id
+env = gymnasium.make(
+    "VizdoomCorridor-v0",  # or any other environment id
+    render_mode="human",
+)  # or any other environment id
 
 screen_shape = env.observation_space["screen"].shape
+screen_shape = (screen_shape[2], screen_shape[0], screen_shape[1])
 action_dim = env.action_space.n
 
 agent = Agent(screen_shape, action_dim)
+agent.load_state_dict(torch.load("agent.pth"))
+
 optimizer = optim.Adam(agent.parameters(), lr=1e-3)
 criterion = nn.MSELoss()  # Define the loss criterion
+
+
+target_agent = Agent(screen_shape, action_dim).to(device)
+target_agent.load_state_dict(agent.state_dict())
+
+
+# ε-greedy
+epsilon_start = 0.8
+epsilon_final = 0.01
+epsilon_decay = 500
+epsilon = epsilon_start
 gamma = 0.99
+
+batch_size = 64
+start_training_after = batch_size * 2
+target_update_frequency = 20
+
+save_frequency = 100
+clear_experience_replay_frequency = 10
+experience_replay_maxlen = 4000
+
+experience_replay = collections.deque(maxlen=experience_replay_maxlen)
+
+
+def epsilon_greedy_action(policy, epsilon):
+    return (
+        random.randrange(action_dim)
+        if random.random() < epsilon
+        else policy.argmax().item()
+    )
+
+
+def update_epsilon(episode):
+    global epsilon
+    epsilon = epsilon_final + (epsilon_start - epsilon_final) * math.exp(
+        -1.0 * episode / epsilon_decay
+    )
 
 
 def augment_observation(observation):
     screen = observation["screen"]
-    screen = tensor(screen).unsqueeze(0)
+    screen = tensor(screen, device=device).unsqueeze(0)
+    # From hwc to chw
+    screen = screen.permute(0, 3, 1, 2)
+
     return screen / 255.0
+
+
+def train_batch():
+    # batch = random.sample(experience_replay, batch_size)
+
+    batch_indices = np.random.choice(len(experience_replay), batch_size, replace=False)
+    batch = [experience_replay[i] for i in batch_indices]
+
+    state_batch = torch.cat([experience[0] for experience in batch]).to(device)
+    action_batch = tensor([experience[1] for experience in batch], device=device)
+    reward_batch = tensor([experience[2] for experience in batch], device=device)
+    next_state_batch = torch.cat([experience[3] for experience in batch]).to(device)
+    done_batch = tensor([experience[4] for experience in batch], device=device).float()
+
+    # Поточні Q-значення
+    policy_batch = agent(state_batch)
+    current_q_values = policy_batch.gather(1, action_batch.unsqueeze(1)).squeeze(1)
+
+    with torch.no_grad():
+        next_policy_batch = agent(next_state_batch)
+        next_actions = next_policy_batch.argmax(dim=1)
+        target_policy_batch = target_agent(next_state_batch)
+        next_q_values = target_policy_batch.gather(
+            1, next_actions.unsqueeze(1)
+        ).squeeze(1)
+        target_q_values = reward_batch + gamma * next_q_values * (1 - done_batch)
+
+    loss = criterion(current_q_values, target_q_values)
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    return loss.item()
+
+
+def episode_fn(episode):
+    agent.train()
+    observation, _ = env.reset()
+    update_epsilon(episode)
+    step = 0
+    while True:
+        current_state = augment_observation(observation)
+        policy = agent(current_state)
+        action = epsilon_greedy_action(policy, epsilon)
+
+        next_observation, reward, terminated, truncated, _ = env.step(action)
+
+        experience_replay.append(
+            (
+                current_state,
+                action,
+                reward,
+                augment_observation(next_observation),
+                terminated or truncated,
+            )
+        )
+
+        if terminated or truncated:
+            break
+
+        if len(experience_replay) > start_training_after and step % 4 == 0:
+            loss = train_batch()
+            torch.cuda.empty_cache()
+
+        observation = next_observation
+        step += 1
+
+    if episode % target_update_frequency == 0:
+        target_agent.load_state_dict(agent.state_dict())
+
+    if episode % save_frequency == 0 and episode > 0:
+        torch.save(agent.state_dict(), f"agent.pth")
 
 
 def train(max_episodes=1000):
     for episode in range(max_episodes):
-        agent.train()
-        observation, _ = env.reset()
-        print("-" * 50)
+        start_time = time.time()
+        episode_fn(episode)
+        print(
+            f"\nEpisode {episode} took {time.time() - start_time:.2f} seconds. {epsilon:.3f} epsilon."
+        )
 
-        step = 0
-        while True:
-            # Отримання поточного стану
-            current_state = augment_observation(observation)
-
-            # Обчислення політики (Q-значення для всіх дій)
-            policy = agent(current_state)
-
-            # Вибір дії
-            action = policy.argmax().item()
-
-            # Виконання дії
-            next_observation, reward, terminated, truncated, _ = env.step(action)
-
-            # Перевірка на завершення епізоду
-            if terminated or truncated:
-                break
-
-            # Обробка наступного стану
-            next_state = augment_observation(next_observation)
-
-            # Обчислення Q-значень для наступного стану
-            with torch.no_grad():
-                next_policy = agent(next_state)
-                max_next_q_value = next_policy.max().item()  # max Q(s_{t+1}, a)
-
-            # Цільове значення для поточного стану
-            target_q_value = (
-                reward + gamma * max_next_q_value
-            )  # r + γ * max(Q(s_{t+1}, a))
-
-            # Обчислення поточного Q-значення для обраної дії
-            current_q_value = policy[0][action]
-
-            # Обчислення втрати (loss)
-            loss = criterion(current_q_value, tensor([target_q_value], device=device))
-
-            # Оновлення моделі
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            step += 1
-
-            if step % 10 == 0:
-                print(
-                    f"E: {episode}, S: {step}, A: {action}, R: {reward}, L: {loss.item()}\r", end=""
-                )
+    print("\nTraining completed.")
 
 
 if __name__ == "__main__":
 
     print(f"Using device: {torch.get_default_device()}")
 
-    train()
+    train(1_000_000)

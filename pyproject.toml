@@ -13,6 +13,7 @@ torchaudio = "^2.4.1"
 matplotlib = "^3.9.2"
 pyqt5 = "^5.15.11"
 vizdoom = "^1.2.4"
+segment-tree = "^0.3.2"
 
 
 [build-system]

@@ -1048,6 +1048,17 @@ files = [
 six = ">=1.5"
 
 [[package]]
+name = "segment-tree"
+version = "0.3.2"
+description = "Multidimensional segment tree with ranges updates."
+optional = false
+python-versions = ">=3"
+files = [
+    {file = "segment_tree-0.3.2-py3-none-any.whl", hash = "sha256:408e320a624ba7470f0ba3dd19539e91974c496c8c4ded1aba193c08d765ba64"},
+    {file = "segment_tree-0.3.2.tar.gz", hash = "sha256:591941461e89a26d3b16ae5c271c7057d56b2efcbbf598b8c56f4131abe7deea"},
+]
+
+[[package]]
 name = "setuptools"
 version = "74.1.2"
 description = "Easily download, build, install, upgrade, and uninstall Python packages"
@@ -1303,4 +1314,4 @@ test = ["psutil", "pytest"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.12,<3.13"
-content-hash = "d45a1a888c4734deaa2bbf2f3b84320e421b65e0c4125b2c7af134834d8ea68d"
+content-hash = "594c291f12990cc242cccd7c792e3a823f701ff6b13d180d700cade219a2a4c5"
