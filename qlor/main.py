@@ -1,4 +1,5 @@
 import gymnasium
+import gymnasium.wrappers.record_video
 import numpy as np
 from vizdoom import gymnasium_wrapper  # This import will register all the environments
 from qlor.agent import Agent
@@ -14,17 +15,27 @@ torch.set_default_device(device)
 
 envs = gymnasium.make_vec(
     "VizdoomCorridor-v0",  # or any other environment id
-    num_envs=32,
+    num_envs=16,
     # render_mode="human",
 )  # or any other environment id
 
+val_env = gymnasium.wrappers.record_video.RecordVideo(
+    gymnasium.make("VizdoomCorridor-v0", render_mode="rgb_array"),
+    video_folder="videos/",
+    disable_logger=True,
+)
 
 screen_shape = envs.single_observation_space["screen"].shape
 screen_shape = (screen_shape[2], screen_shape[0], screen_shape[1])
 action_dim = envs.single_action_space.n
 
 agent = Agent(screen_shape, action_dim)
-agent.load_state_dict(torch.load("agent.pth"))
+
+try:
+    agent.load_state_dict(torch.load("agent.pth"))
+    print("Loaded agent from file")
+except FileNotFoundError:
+    print("No agent file found, starting from scratch")
 
 optimizer = optim.Adam(agent.parameters(), lr=1e-3)
 criterion = nn.MSELoss()  # Define the loss criterion
@@ -35,9 +46,9 @@ target_agent.load_state_dict(agent.state_dict())
 
 
 # ε-greedy
-epsilon_start = 0.01
+epsilon_start = 1.00
 epsilon_final = 0.01
-epsilon_decay = 500
+epsilon_decay = 4000
 epsilon = epsilon_start
 gamma = 0.99
 
@@ -45,8 +56,10 @@ batch_size = 256
 start_training_after = batch_size * 2
 target_update_frequency = 20
 
+validation_frequency = 1000
+
+print_frequency = 10
 save_frequency = 100
-clear_experience_replay_frequency = 10
 experience_replay_maxlen = 2000
 
 experience_replay = collections.deque(maxlen=experience_replay_maxlen)
@@ -117,11 +130,11 @@ def train_batch():
     return loss.item()
 
 
-def episode_fn(episode, max_steps=1000):
-    agent.train()
+def continuous_training(max_steps=100_000_000):
     observation, _ = envs.reset()
-    update_epsilon(episode)
     step = 0
+    loss = 0
+
     while step < max_steps:
         torch.cuda.empty_cache()
         current_state = augment_observation(observation)
@@ -145,29 +158,39 @@ def episode_fn(episode, max_steps=1000):
 
         observation = next_observations
         step += 1
+        update_epsilon(step)
 
+        if step % print_frequency == 0:
+            print(f"Step: {step}, Loss: {loss:.8f}, Epsilon: {epsilon:.3f}")
+
+        if step % target_update_frequency == 0:
+            target_agent.load_state_dict(agent.state_dict())
+
+        if step % save_frequency == 0 and step > 0:
+            torch.save(agent.state_dict(), f"agent.pth")
+
+        # Reset environment if all terminated or truncated
         if np.all(terminateds) or np.all(truncateds):
-            break
-    if episode % target_update_frequency == 0:
-        target_agent.load_state_dict(agent.state_dict())
+            observation, _ = envs.reset()
 
-    if episode % save_frequency == 0 and episode > 0:
-        torch.save(agent.state_dict(), f"agent.pth")
+        if step % validation_frequency == 0:
+            val_env.reset()
+            val_observation, _ = val_env.reset()
 
-
-def train(max_episodes=1000):
-    for episode in range(max_episodes):
-        start_time = time.time()
-        episode_fn(episode)
-        print(
-            f"\nEpisode {episode} took {time.time() - start_time:.2f} seconds. {epsilon:.3f} epsilon."
-        )
-
-    print("\nTraining completed.")
+            while True:
+                val_observation["screen"] = [val_observation["screen"]]
+                val_state = augment_observation(val_observation)
+                val_policy = agent(val_state)
+                val_actions = val_policy.argmax().item()
+                val_observation, _, val_terminated, val_truncated, _ = val_env.step(
+                    val_actions
+                )
+                if val_terminated or val_truncated:
+                    break
 
 
 if __name__ == "__main__":
 
     print(f"Using device: {torch.get_default_device()}")
 
-    train(1_000_000)
+    continuous_training()
