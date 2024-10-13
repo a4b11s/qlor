@@ -32,7 +32,7 @@ class Trainer:
         self.batch_size = 256
 
         self.target_update_frequency = 200
-        self.validation_frequency = 10
+        self.validation_frequency = 1000
 
         self.print_frequency = 10
         self.save_frequency = 5000
@@ -64,24 +64,8 @@ class Trainer:
     def train_batch(self, batch_size):
         batch = self.experience_replay.sample(batch_size)
 
-        state_batch = torch.cat(
-            [experience[0].unsqueeze(0) for experience in batch]
-        ).to(self.device)
-        action_batch = torch.tensor(
-            [experience[1] for experience in batch], device=self.device
-        ).long()
-        reward_batch = torch.tensor(
-            [experience[2] for experience in batch],
-            device=self.device,
-            dtype=torch.float32,
-        )
-        next_state_batch = torch.cat(
-            [experience[3].unsqueeze(0) for experience in batch]
-        ).to(self.device)
-        done_batch = torch.tensor(
-            [experience[4] for experience in batch],
-            device=self.device,
-            dtype=torch.float32,
+        state_batch, action_batch, reward_batch, next_state_batch, done_batch = (
+            self.experience_replay.map_batch(batch, self.device)
         )
 
         # Current Q values
@@ -103,6 +87,7 @@ class Trainer:
     def train(self, max_steps=1_000_000):
         if self.start_time is None:
             self.start_time = datetime.datetime.now()
+
         observation, _ = self.envs.reset()
         loss = 0
 

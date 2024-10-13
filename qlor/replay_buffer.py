@@ -51,3 +51,27 @@ class ReplayBuffer:
 
     def __getitem__(self, idx):
         return self.buffer[idx]
+
+    @staticmethod
+    def map_batch(batch, device):
+        state_batch = torch.cat(
+            [experience[0].unsqueeze(0) for experience in batch]
+        ).to(device)
+        action_batch = torch.tensor(
+            [experience[1] for experience in batch], device=device
+        ).long()
+        reward_batch = torch.tensor(
+            [experience[2] for experience in batch],
+            device=device,
+            dtype=torch.float32,
+        )
+        next_state_batch = torch.cat(
+            [experience[3].unsqueeze(0) for experience in batch]
+        ).to(device)
+        done_batch = torch.tensor(
+            [experience[4] for experience in batch],
+            device=device,
+            dtype=torch.float32,
+        )
+
+        return state_batch, action_batch, reward_batch, next_state_batch, done_batch

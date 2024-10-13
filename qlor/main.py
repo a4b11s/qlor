@@ -45,7 +45,7 @@ def train():
     epsilon = Epsilon(
         start=1.0,
         end=0.01,
-        decay=1000,
+        decay=500,
     )
 
     trainer = Trainer(
