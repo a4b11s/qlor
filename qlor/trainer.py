@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 import random
@@ -228,6 +229,7 @@ class Trainer:
             "metrics_path": path + "/metrics.pkl",
             "experience_replay_path": path + "/experience_replay.pkl",
             "agent_path": path + "/agent.pth",
+            "datetime": str(datetime.datetime.now()),
         }
 
         self.save_config(manifest["config_path"])
