@@ -174,7 +174,7 @@ class Trainer:
         for metric_name, metric_value in self.metrics.items():
             if isinstance(metric_value, float):
                 print_string += f", {metric_name}: {metric_value:.3f}"
-            else:
+            elif isinstance(metric_value, str) or isinstance(metric_value, int):
                 print_string += f", {metric_name}: {metric_value}"
 
         print(print_string)
@@ -189,8 +189,12 @@ class Trainer:
         elif mode == "average":
             # old_value = self.metrics[metrics_name]
             # self.metrics[metrics_name] = (old_value + value) / 2
-            raise NotImplementedError
-
+            if "_" + metrics_name not in self.metrics:
+                self.metrics["_" + metrics_name] = []
+            
+            self.metrics["_" + metrics_name].append(value)
+            self.metrics[metrics_name] = np.mean(self.metrics["_" + metrics_name])
+            
         elif mode == "replace":
             self.metrics[metrics_name] = value
 
