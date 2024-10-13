@@ -88,6 +88,10 @@ class Trainer:
         policy_batch = self.agent(state_batch)
         current_q_values = policy_batch.gather(1, action_batch.unsqueeze(1)).squeeze(1)
 
+        target_q_values = self.calculate_target_q_values(
+            next_state_batch, reward_batch, done_batch
+        )
+
         loss = self.criterion(current_q_values, target_q_values)
 
         self.optimizer.zero_grad()
