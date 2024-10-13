@@ -2,6 +2,7 @@ import datetime
 import json
 import os
 import random
+import timeit
 import numpy as np
 import torch
 import pickle
@@ -33,11 +34,13 @@ class Trainer:
         self.validation_frequency = 1000
 
         self.print_frequency = 10
-        self.save_frequency = 100
+        self.save_frequency = 5000
         self.experience_replay_maxlen = 2000
 
         self.episode = 0
         self.step = 0
+
+        self.start_time = datetime.datetime.now()
 
         self.experience_replay = ReplayBuffer(
             self.experience_replay_maxlen, self.device
@@ -94,6 +97,7 @@ class Trainer:
         return loss.item()
 
     def train(self, max_steps=1_000_000):
+        self.start_time = datetime.datetime.now()
         observation, _ = self.envs.reset()
         loss = 0
 
@@ -118,7 +122,9 @@ class Trainer:
 
             observation = next_observations
 
-            self.update_metrics("loss", loss)
+            self.update_metrics("loss", loss, mode="replace")
+            self.update_metrics("reward", np.mean(rewards), mode="replace")
+
             if np.any(terminateds) or np.any(truncateds):
                 self.episode += 1
 
@@ -127,9 +133,12 @@ class Trainer:
     def on_step_end(self):
         self.step += 1
         self.epsilon.update_epsilon(self.step)
-        
+
         self.update_metrics("epsilon", self.epsilon(), mode="replace")
         self.update_metrics("step", self.step, mode="replace")
+        
+        elapsed_time = datetime.datetime.now() - self.start_time
+        self.update_metrics("elapsed_time", str(elapsed_time), mode="replace")
 
         torch.cuda.empty_cache()
         if self.step % self.print_frequency == 0 and self.step > 0:
@@ -178,8 +187,9 @@ class Trainer:
             self.metrics[metrics_name] += value
 
         elif mode == "average":
-            old_value = self.metrics[metrics_name]
-            self.metrics[metrics_name] = (old_value + value) / 2
+            # old_value = self.metrics[metrics_name]
+            # self.metrics[metrics_name] = (old_value + value) / 2
+            raise NotImplementedError
 
         elif mode == "replace":
             self.metrics[metrics_name] = value
@@ -220,7 +230,7 @@ class Trainer:
 
     def save(self, path):
         print(f"Saving checkpoint to {path}")
-        
+
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -239,7 +249,7 @@ class Trainer:
 
         with open(path + "/manifest.json", "w") as f:
             f.write(json.dumps(manifest, indent=4))
-            
+
         print("Checkpoint saved")
 
     def load(self, path):
