@@ -33,7 +33,7 @@ class Trainer:
 
         self.print_frequency = 10
         self.save_frequency = 100
-        self.experience_replay_maxlen = 10000
+        self.experience_replay_maxlen = 2000
 
         self.episode = 0
         self.step = 0
@@ -51,17 +51,6 @@ class Trainer:
             "criterion",
             "device",
             "epsilon",
-            "gamma",
-            "batch_size",
-            "target_update_frequency",
-            "validation_frequency",
-            "print_frequency",
-            "save_frequency",
-            "experience_replay_maxlen",
-            "episode",
-            "step",
-            "experience_replay",
-            "metrics",
         ]
 
     def train_batch(self, batch_size):
@@ -108,7 +97,6 @@ class Trainer:
         loss = 0
 
         while self.step < max_steps:
-            torch.cuda.empty_cache()
             current_state = self.augment_observation(observation)
             policy = self.agent(current_state)
             actions = self.epsilon_greedy_action(policy, self.epsilon())
@@ -138,9 +126,11 @@ class Trainer:
     def on_step_end(self):
         self.step += 1
         self.epsilon.update_epsilon(self.step)
+        
         self.update_metrics("epsilon", self.epsilon(), mode="replace")
         self.update_metrics("step", self.step, mode="replace")
 
+        torch.cuda.empty_cache()
         if self.step % self.print_frequency == 0 and self.step > 0:
             self.print_metrics()
 
@@ -228,6 +218,8 @@ class Trainer:
         self.target_agent.load_state_dict(dict)
 
     def save(self, path):
+        print(f"Saving checkpoint to {path}")
+        
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -240,11 +232,13 @@ class Trainer:
 
         self.save_config(manifest["config_path"])
         self.save_metrics(manifest["metrics_path"])
-        self.save_experience_replay(manifest["experience_replay_path"])
+        # self.save_experience_replay(manifest["experience_replay_path"])
         self.save_agent(manifest["agent_path"])
 
         with open(path + "/manifest.json", "w") as f:
             f.write(json.dumps(manifest, indent=4))
+            
+        print("Checkpoint saved")
 
     def load(self, path):
         with open(path + "/manifest.json", "r") as f:
@@ -252,5 +246,5 @@ class Trainer:
 
         self.load_config(manifest["config_path"])
         self.load_metrics(manifest["metrics_path"])
-        self.load_experience_replay(manifest["experience_replay_path"])
+        # self.load_experience_replay(manifest["experience_replay_path"])
         self.load_agent(manifest["agent_path"])
