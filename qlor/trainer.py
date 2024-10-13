@@ -13,12 +13,13 @@ from qlor.replay_buffer import ReplayBuffer
 
 class Trainer:
     def __init__(
-        self, agent, target_agent, envs, optimizer, epsilon, criterion, device
+        self, agent, target_agent, envs, val_env, optimizer, epsilon, criterion, device
     ):
         self.agent: torch.nn.Module = agent
         self.target_agent: torch.nn.Module = target_agent
 
         self.envs = envs
+        self.val_env = val_env
         self.action_dim = envs.single_action_space.n
 
         self.optimizer = optimizer
@@ -31,7 +32,7 @@ class Trainer:
         self.batch_size = 256
 
         self.target_update_frequency = 200
-        self.validation_frequency = 1000
+        self.validation_frequency = 10
 
         self.print_frequency = 10
         self.save_frequency = 5000
@@ -40,7 +41,7 @@ class Trainer:
         self.episode = 0
         self.step = 0
 
-        self.start_time = datetime.datetime.now()
+        self.start_time = None
 
         self.experience_replay = ReplayBuffer(
             self.experience_replay_maxlen, self.device
@@ -55,6 +56,9 @@ class Trainer:
             "criterion",
             "device",
             "epsilon",
+            "step",
+            "episode",
+            "start_time",
         ]
 
     def train_batch(self, batch_size):
@@ -74,19 +78,15 @@ class Trainer:
         next_state_batch = torch.cat(
             [experience[3].unsqueeze(0) for experience in batch]
         ).to(self.device)
+        done_batch = torch.tensor(
+            [experience[4] for experience in batch],
+            device=self.device,
+            dtype=torch.float32,
+        )
 
         # Current Q values
         policy_batch = self.agent(state_batch)
         current_q_values = policy_batch.gather(1, action_batch.unsqueeze(1)).squeeze(1)
-
-        with torch.no_grad():
-            next_policy_batch = self.agent(next_state_batch)
-            next_actions = next_policy_batch.argmax(dim=1)
-            target_policy_batch = self.target_agent(next_state_batch)
-            next_q_values = target_policy_batch.gather(
-                1, next_actions.unsqueeze(1)
-            ).squeeze(1)
-            target_q_values = reward_batch + self.gamma * next_q_values
 
         loss = self.criterion(current_q_values, target_q_values)
 
@@ -97,7 +97,8 @@ class Trainer:
         return loss.item()
 
     def train(self, max_steps=1_000_000):
-        self.start_time = datetime.datetime.now()
+        if self.start_time is None:
+            self.start_time = datetime.datetime.now()
         observation, _ = self.envs.reset()
         loss = 0
 
@@ -115,6 +116,7 @@ class Trainer:
                     actions[i],
                     rewards[i],
                     self.augment_observation(next_observations)[i],
+                    terminateds[i] or truncateds[i],
                 )
 
             if len(self.experience_replay) > self.batch_size:
@@ -133,16 +135,21 @@ class Trainer:
             self.on_step_end()
 
     def on_step_end(self):
+        torch.cuda.empty_cache()
+
         self.step += 1
         self.epsilon.update_epsilon(self.step)
 
         self.update_metrics("epsilon", self.epsilon(), mode="replace")
         self.update_metrics("step", self.step, mode="replace")
-        
+
         elapsed_time = datetime.datetime.now() - self.start_time
         self.update_metrics("elapsed_time", str(elapsed_time), mode="replace")
 
-        torch.cuda.empty_cache()
+        if self.step % self.validation_frequency == 0:
+            val = self.validate()
+            self.update_metrics("val_reward", val, mode="replace")
+
         if self.step % self.print_frequency == 0 and self.step > 0:
             self.print_metrics()
 
@@ -151,6 +158,38 @@ class Trainer:
 
         if self.step % self.save_frequency == 0 and self.step > 0:
             self.save(self.save_path)
+
+    def validate(self, max_steps=1000):
+        observation, _ = self.val_env.reset()
+        rewards = []
+
+        while len(rewards) < max_steps:
+            current_state = self.augment_observation(observation)
+            policy = self.agent(current_state)
+            actions = policy.argmax(dim=1).item()
+
+            observation, reward, terminated, truncated, _ = self.val_env.step(actions)
+
+            rewards.append(reward)
+
+            if terminated or truncated:
+                break
+
+        return np.mean(rewards)
+
+    def calculate_target_q_values(self, next_state_batch, reward_batch, done_batch):
+        with torch.no_grad():
+            next_policy_batch = self.agent(next_state_batch)
+            next_actions = next_policy_batch.argmax(dim=1)
+            target_policy_batch = self.target_agent(next_state_batch)
+            next_q_values = target_policy_batch.gather(
+                1, next_actions.unsqueeze(1)
+            ).squeeze(1)
+            target_q_values = reward_batch + self.gamma * next_q_values * (
+                1 - done_batch
+            )
+
+        return target_q_values
 
     def epsilon_greedy_action(self, policy, epsilon):
         actions = []
@@ -166,6 +205,8 @@ class Trainer:
         screen = observation["screen"]
         screen = torch.tensor(screen, device=self.device)  # bs w h c
         # From bshwc to bschw
+        if screen.dim() < 4:
+            screen = screen.unsqueeze(0)
         screen = screen.permute(0, 3, 1, 2)
 
         return screen / 255.0
@@ -176,7 +217,7 @@ class Trainer:
         for metric_name, metric_value in self.metrics.items():
             if metric_name[0] == "_":
                 continue
-            
+
             if isinstance(metric_value, float):
                 print_string += f", {metric_name}: {metric_value:.3f}"
             else:
@@ -196,10 +237,10 @@ class Trainer:
             # self.metrics[metrics_name] = (old_value + value) / 2
             if "_" + metrics_name not in self.metrics:
                 self.metrics["_" + metrics_name] = []
-            
+
             self.metrics["_" + metrics_name].append(value)
             self.metrics[metrics_name] = np.mean(self.metrics["_" + metrics_name])
-            
+
         elif mode == "replace":
             self.metrics[metrics_name] = value
 
