@@ -13,13 +13,22 @@ from qlor.trainer import Trainer
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.set_default_device(device)
-    
+
     print(f"Using device: {torch.get_default_device()}")
 
+    env_id = "VizdoomCorridor-v0"
+
     envs = gymnasium.make_vec(
-        "VizdoomCorridor-v0",  # or any other environment id
-        num_envs=16,
+        env_id,  # or any other environment id
+        num_envs=32,
         # render_mode="human",
+    )
+
+    val_env = gymnasium.wrappers.record_video.RecordVideo(
+        gymnasium.make(env_id, render_mode="rgb_array"),
+        video_folder="videos",
+        episode_trigger=lambda _: True,
+        disable_logger=True,
     )
 
     screen_shape = envs.single_observation_space["screen"].shape
@@ -36,18 +45,25 @@ def train():
     epsilon = Epsilon(
         start=1.0,
         end=0.01,
-        decay=5000,
+        decay=1000,
     )
 
     trainer = Trainer(
         agent=agent,
         target_agent=target_agent,
         envs=envs,
+        val_env = val_env,
         optimizer=optimizer,
         epsilon=epsilon,
         criterion=criterion,
         device=device,
     )
+    
+    try:
+        trainer.load("checkpoint")
+        print("Checkpoint loaded.")
+    except FileNotFoundError:
+        print("Checkpoint not found. Starting from scratch.")
 
     trainer.train()
 

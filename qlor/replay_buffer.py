@@ -10,13 +10,14 @@ class ReplayBuffer:
 
         self.device = device
 
-    def add(self, state, action, reward, next_state):
+    def add(self, state, action, reward, next_state, done):
         state = self._add_prepare(state)
         action = self._add_prepare(action)
         reward = self._add_prepare(reward)
         next_state = self._add_prepare(next_state)
+        done = self._add_prepare(done)
 
-        self.buffer.append((state, action, reward, next_state))
+        self.buffer.append((state, action, reward, next_state, done))
 
     def sample(self, batch_size, device=None):
         _device = device
