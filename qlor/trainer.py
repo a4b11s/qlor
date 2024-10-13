@@ -124,6 +124,8 @@ class Trainer:
 
             self.update_metrics("loss", loss, mode="replace")
             self.update_metrics("reward", np.mean(rewards), mode="replace")
+            self.update_metrics("avg_loss", loss, mode="average")
+            self.update_metrics("avg_reward", np.mean(rewards), mode="average")
 
             if np.any(terminateds) or np.any(truncateds):
                 self.episode += 1
@@ -172,9 +174,12 @@ class Trainer:
         print_string = f"Episode: {self.episode}"
 
         for metric_name, metric_value in self.metrics.items():
+            if metric_name[0] == "_":
+                continue
+            
             if isinstance(metric_value, float):
                 print_string += f", {metric_name}: {metric_value:.3f}"
-            elif isinstance(metric_value, str) or isinstance(metric_value, int):
+            else:
                 print_string += f", {metric_name}: {metric_value}"
 
         print(print_string)
