@@ -31,7 +31,14 @@ class ReplayBuffer:
             np.arange(len(self.buffer)), size=batch_size, replace=False
         )
 
-        return [torch.tensor(self.buffer[i], device=_device) for i in idx]
+        sampled = []
+
+        for i in idx:
+            sampled.append(
+                [torch.tensor(field, device=_device) for field in self.buffer[i]]
+            )
+
+        return sampled
 
     def __len__(self):
         return len(self.buffer)
