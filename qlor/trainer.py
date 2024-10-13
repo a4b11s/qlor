@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import numpy as np
 import torch
@@ -16,6 +17,7 @@ class Trainer:
         self.target_agent: torch.nn.Module = target_agent
 
         self.envs = envs
+        self.action_dim = envs.single_action_space.n
 
         self.optimizer = optimizer
         self.criterion = criterion
@@ -31,7 +33,7 @@ class Trainer:
 
         self.print_frequency = 10
         self.save_frequency = 100
-        self.experience_replay_maxlen = 2000
+        self.experience_replay_maxlen = 10000
 
         self.episode = 0
         self.step = 0
@@ -42,9 +44,7 @@ class Trainer:
 
         self.save_path = "checkpoint"
 
-        self.metrics = {
-            "loss": [],
-        }
+        self.metrics = {}
 
         self.config_field = [
             "optimizer",
@@ -67,7 +67,9 @@ class Trainer:
     def train_batch(self, batch_size):
         batch = self.experience_replay.sample(batch_size)
 
-        state_batch = torch.cat([experience[0] for experience in batch]).to(self.device)
+        state_batch = torch.cat(
+            [experience[0].unsqueeze(0) for experience in batch]
+        ).to(self.device)
         action_batch = torch.tensor(
             [experience[1] for experience in batch], device=self.device
         ).long()
@@ -76,9 +78,9 @@ class Trainer:
             device=self.device,
             dtype=torch.float32,
         )
-        next_state_batch = torch.cat([experience[3] for experience in batch]).to(
-            self.device
-        )
+        next_state_batch = torch.cat(
+            [experience[3].unsqueeze(0) for experience in batch]
+        ).to(self.device)
 
         # Current Q values
         policy_batch = self.agent(state_batch)
@@ -116,22 +118,28 @@ class Trainer:
 
             for i in range(self.envs.num_envs):
                 self.experience_replay.add(
-                    current_state[i], actions[i], rewards[i], next_observations[i]
+                    current_state[i],
+                    actions[i],
+                    rewards[i],
+                    self.augment_observation(next_observations)[i],
                 )
 
-            if len(self.experience_replay) > self.batch_size and self.step % 4 == 0:
-                loss = self.train_batch()
+            if len(self.experience_replay) > self.batch_size:
+                loss = self.train_batch(self.batch_size)
 
             observation = next_observations
 
             self.update_metrics("loss", loss)
             if np.any(terminateds) or np.any(truncateds):
                 self.episode += 1
+
             self.on_step_end()
 
     def on_step_end(self):
         self.step += 1
         self.epsilon.update_epsilon(self.step)
+        self.update_metrics("epsilon", self.epsilon(), mode="replace")
+        self.update_metrics("step", self.step, mode="replace")
 
         if self.step % self.print_frequency == 0 and self.step > 0:
             self.print_metrics()
@@ -142,13 +150,11 @@ class Trainer:
         if self.step % self.save_frequency == 0 and self.step > 0:
             self.save(self.save_path)
 
-    @staticmethod
-    def epsilon_greedy_action(policy, epsilon):
-        action_dim = policy.shape[1]
+    def epsilon_greedy_action(self, policy, epsilon):
         actions = []
         for p in policy:
             actions.append(
-                random.randrange(action_dim)
+                random.randrange(self.action_dim)
                 if random.random() < epsilon
                 else p.argmax().item()
             )
@@ -166,15 +172,26 @@ class Trainer:
         print_string = f"Episode: {self.episode}"
 
         for metric_name, metric_value in self.metrics.items():
-            print_string += f", {metric_name}: {metric_value:.3f}"
+            if isinstance(metric_value, float):
+                print_string += f", {metric_name}: {metric_value:.3f}"
+            else:
+                print_string += f", {metric_name}: {metric_value}"
 
         print(print_string)
 
-    def update_metrics(self, metrics_name, value):
+    def update_metrics(self, metrics_name, value, mode="average"):
         if metrics_name not in self.metrics:
             self.metrics[metrics_name] = 0
 
-        self.metrics[metrics_name] = (self.metrics[metrics_name] + value) / 2
+        if mode == "sum":
+            self.metrics[metrics_name] += value
+
+        elif mode == "average":
+            old_value = self.metrics[metrics_name]
+            self.metrics[metrics_name] = (old_value + value) / 2
+
+        elif mode == "replace":
+            self.metrics[metrics_name] = value
 
     def save_config(self, path):
         with open(path, "wb") as f:
@@ -211,6 +228,9 @@ class Trainer:
         self.target_agent.load_state_dict(dict)
 
     def save(self, path):
+        if not os.path.exists(path):
+            os.makedirs(path)
+
         manifest = {
             "config_path": path + "/config.pkl",
             "metrics_path": path + "/metrics.pkl",
