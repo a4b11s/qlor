@@ -1,0 +1,6 @@
+[submodule "ReplayBuffer"]
+	path = ReplayBuffer
+	url = git@github.com:a4b11s/ReplayBuffer.git
+[submodule "qlor/ReplayBuffer"]
+	path = qlor/ReplayBuffer
+	url = git@github.com:a4b11s/ReplayBuffer.git
