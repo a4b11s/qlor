@@ -2,13 +2,12 @@ import datetime
 import json
 import os
 import random
-import timeit
 import numpy as np
 import torch
 import pickle
 
 from qlor.epsilon import Epsilon
-from qlor.replay_buffer import ReplayBuffer
+from qlor.ReplayBuffer.replaybuffer.replay_buffer import ReplayBuffer
 
 
 class Trainer:
@@ -34,17 +33,25 @@ class Trainer:
         self.target_update_frequency = 200
         self.validation_frequency = 1000
 
-        self.print_frequency = 10
+        self.print_frequency = 1
         self.save_frequency = 5000
-        self.experience_replay_maxlen = 2000
+        self.experience_replay_maxlen = 100_000  # 2_000_000
 
         self.episode = 0
         self.step = 0
 
         self.start_time = None
 
+        screen_shape = envs.single_observation_space["screen"].shape
+        screen_shape = (screen_shape[2], screen_shape[0], screen_shape[1])
+
         self.experience_replay = ReplayBuffer(
-            self.experience_replay_maxlen, self.device
+            max_size=self.experience_replay_maxlen,
+            h5_path="data/buffer.h5",
+            image_shape=screen_shape,
+            device=self.device,
+            batch_size=self.batch_size,
+            save_queue_size=500,
         )
 
         self.save_path = "checkpoint"
@@ -62,15 +69,16 @@ class Trainer:
         ]
 
     def train_batch(self, batch_size):
-        batch = self.experience_replay.sample(batch_size)
+        batch = self.experience_replay.sample()
 
         state_batch, action_batch, reward_batch, next_state_batch, done_batch = (
-            self.experience_replay.map_batch(batch, self.device)
+            self.map_batch(batch, self.device)
         )
 
         # Current Q values
         policy_batch = self.agent(state_batch)
-        current_q_values = policy_batch.gather(1, action_batch.unsqueeze(1)).squeeze(1)
+
+        current_q_values = policy_batch.gather(1, action_batch).squeeze(1)
 
         target_q_values = self.calculate_target_q_values(
             next_state_batch, reward_batch, done_batch
@@ -108,7 +116,7 @@ class Trainer:
                     terminateds[i] or truncateds[i],
                 )
 
-            if len(self.experience_replay) > self.batch_size:
+            if len(self.experience_replay) > self.batch_size * 2:
                 loss = self.train_batch(self.batch_size)
 
             observation = next_observations
@@ -131,6 +139,14 @@ class Trainer:
 
         self.update_metrics("epsilon", self.epsilon(), mode="replace")
         self.update_metrics("step", self.step, mode="replace")
+        self.update_metrics(
+            "buffer_size", self.experience_replay.length, mode="replace"
+        )
+        self.update_metrics(
+            "prefetch_size",
+            self.experience_replay.prefetcher.prefetch_batches.qsize(),
+            mode="replace",
+        )
 
         elapsed_time = datetime.datetime.now() - self.start_time
         self.update_metrics("elapsed_time", str(elapsed_time), mode="replace")
@@ -299,3 +315,15 @@ class Trainer:
         self.load_metrics(manifest["metrics_path"])
         # self.load_experience_replay(manifest["experience_replay_path"])
         self.load_agent(manifest["agent_path"])
+
+    @staticmethod
+    def map_batch(batch, device):
+        state_batch = torch.tensor(batch["state"], dtype=torch.float32, device=device)
+        action_batch = torch.tensor(batch["action"], device=device).long()
+        reward_batch = torch.tensor(batch["reward"], device=device, dtype=torch.float32)
+        next_state_batch = torch.tensor(
+            batch["next_state"], dtype=torch.float32, device=device
+        )
+        done_batch = torch.tensor(batch["done"], device=device, dtype=torch.float32)
+
+        return state_batch, action_batch, reward_batch, next_state_batch, done_batch

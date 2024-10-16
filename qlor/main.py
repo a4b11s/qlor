@@ -1,3 +1,4 @@
+import logging
 import gymnasium
 import gymnasium.wrappers.record_video
 import numpy as np
@@ -14,6 +15,8 @@ def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.set_default_device(device)
 
+    logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.ERROR)
+    
     print(f"Using device: {torch.get_default_device()}")
 
     env_id = "VizdoomCorridor-v0"
