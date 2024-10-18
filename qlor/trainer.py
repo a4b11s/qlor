@@ -2,12 +2,17 @@ import datetime
 import json
 import os
 import random
+import time
+from matplotlib import pyplot as plt
 import numpy as np
 import torch
 import pickle
 
+from torchvision import transforms
+from torchrl.data import ReplayBuffer, LazyMemmapStorage, SamplerWithoutReplacement
+from tensordict.tensordict import TensorDict
+
 from qlor.epsilon import Epsilon
-from qlor.ReplayBuffer.replaybuffer.replay_buffer import ReplayBuffer
 
 
 class Trainer:
@@ -28,14 +33,14 @@ class Trainer:
         self.epsilon: Epsilon = epsilon
         self.gamma = 0.99
 
-        self.batch_size = 256
+        self.batch_size = 512
 
         self.target_update_frequency = 200
         self.validation_frequency = 1000
 
-        self.print_frequency = 1
+        self.print_frequency = 100
         self.save_frequency = 5000
-        self.experience_replay_maxlen = 100_000  # 2_000_000
+        self.experience_replay_maxlen = 2_000_000
 
         self.episode = 0
         self.step = 0
@@ -46,12 +51,13 @@ class Trainer:
         screen_shape = (screen_shape[2], screen_shape[0], screen_shape[1])
 
         self.experience_replay = ReplayBuffer(
-            max_size=self.experience_replay_maxlen,
-            h5_path="data/buffer.h5",
-            image_shape=screen_shape,
-            device=self.device,
+            storage=LazyMemmapStorage(
+                max_size=self.experience_replay_maxlen,
+                scratch_dir="./data/scratch",
+            ),
             batch_size=self.batch_size,
-            save_queue_size=500,
+            prefetch=4,
+            sampler=SamplerWithoutReplacement(),
         )
 
         self.save_path = "checkpoint"
@@ -68,17 +74,30 @@ class Trainer:
             "start_time",
         ]
 
-    def train_batch(self, batch_size):
-        batch = self.experience_replay.sample()
-
-        state_batch, action_batch, reward_batch, next_state_batch, done_batch = (
-            self.map_batch(batch, self.device)
+        self.transform = transforms.Compose(
+            [
+                transforms.Grayscale(),
+                transforms.Resize((60, 80)),
+            ]
         )
+
+    def train_batch(self, batch_size):
+        batch = self.experience_replay.sample().to(self.device)
+
+        # state_batch, action_batch, reward_batch, next_state_batch, done_batch = (
+        #     self.map_batch(batch, self.device)
+        # )
+
+        state_batch = batch["observation"]
+        action_batch = batch["action"]
+        reward_batch = batch["rewards"]
+        next_state_batch = batch["next_observation"]
+        done_batch = batch["done"]
 
         # Current Q values
         policy_batch = self.agent(state_batch)
 
-        current_q_values = policy_batch.gather(1, action_batch).squeeze(1)
+        current_q_values = policy_batch.gather(1, action_batch.unsqueeze(1)).squeeze(1)
 
         target_q_values = self.calculate_target_q_values(
             next_state_batch, reward_batch, done_batch
@@ -99,25 +118,35 @@ class Trainer:
         observation, _ = self.envs.reset()
         loss = 0
 
+        observation = self.augment_observation(observation)  # bschw
+        
         while self.step < max_steps:
-            current_state = self.augment_observation(observation)
+            current_state = observation
             policy = self.agent(current_state)
             actions = self.epsilon_greedy_action(policy, self.epsilon())
             next_observations, rewards, terminateds, truncateds, _ = self.envs.step(
                 actions
             )
 
-            for i in range(self.envs.num_envs):
-                self.experience_replay.add(
-                    current_state[i],
-                    actions[i],
-                    rewards[i],
-                    self.augment_observation(next_observations)[i],
-                    terminateds[i] or truncateds[i],
-                )
+            next_observations = self.augment_observation(next_observations)
+
+            data_dict = TensorDict(
+                {
+                    "observation": current_state,
+                    "next_observation": next_observations,
+                    "action": torch.tensor(actions),
+                    "rewards": torch.tensor(rewards, dtype=torch.float32),
+                    "done": torch.tensor(terminateds) | torch.tensor(truncateds),
+                },
+                device=self.device,
+                batch_size=self.envs.num_envs,
+            )
+
+            self.experience_replay.extend(data_dict)
 
             if len(self.experience_replay) > self.batch_size * 2:
                 loss = self.train_batch(self.batch_size)
+                pass
 
             observation = next_observations
 
@@ -139,14 +168,12 @@ class Trainer:
 
         self.update_metrics("epsilon", self.epsilon(), mode="replace")
         self.update_metrics("step", self.step, mode="replace")
-        self.update_metrics(
-            "buffer_size", self.experience_replay.length, mode="replace"
-        )
-        self.update_metrics(
-            "prefetch_size",
-            self.experience_replay.prefetcher.prefetch_batches.qsize(),
-            mode="replace",
-        )
+        self.update_metrics("buffer_size", len(self.experience_replay), mode="replace")
+        # self.update_metrics(
+        #     "prefetch_size",
+        #     self.experience_replay.prefetcher.prefetch_batches.qsize(),
+        #     mode="replace",
+        # )
 
         elapsed_time = datetime.datetime.now() - self.start_time
         self.update_metrics("elapsed_time", str(elapsed_time), mode="replace")
@@ -191,7 +218,7 @@ class Trainer:
                 1, next_actions.unsqueeze(1)
             ).squeeze(1)
             target_q_values = reward_batch + self.gamma * next_q_values * (
-                1 - done_batch
+                1 - done_batch.float()
             )
 
         return target_q_values
@@ -213,6 +240,8 @@ class Trainer:
         if screen.dim() < 4:
             screen = screen.unsqueeze(0)
         screen = screen.permute(0, 3, 1, 2)
+
+        screen = self.transform(screen)
 
         return screen / 255.0
 
