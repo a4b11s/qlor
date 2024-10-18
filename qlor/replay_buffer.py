@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import h5py as h5
 import threading
+import logging
 
 
 class ReplayBuffer:
@@ -26,6 +27,7 @@ class ReplayBuffer:
         self.lock = threading.Lock()
         self.prefetch_thread = threading.Thread(target=self._prefetch)
         self.save_thread = threading.Thread(target=self._prefetch_save)
+        self._run_threads()
 
     def add(self, state, action, reward, next_state, done):
         state = self._add_prepare(state)
@@ -34,7 +36,11 @@ class ReplayBuffer:
         next_state = self._add_prepare(next_state)
         done = self._add_prepare(done)
 
-        experience = np.array([state, action, reward, next_state, done], dtype=object)
+        logging.debug(
+            f"Adding experience to buffer: {state.shape}, {action}, {reward}, {next_state.shape}, {done}"
+        )
+
+        experience = np.array([[state, action, reward, next_state, done]], dtype=object)
         self._save_batch_to_disk(experience)
 
     def sample(self):
@@ -133,7 +139,6 @@ class ReplayBuffer:
             raise ValueError("Not enough samples in the buffer")
 
         indx = np.sort(np.random.choice(self.length, self.batch_size, replace=False))
-        self.lock.acquire()
 
         with h5.File(self.h5_path, "r") as h5_file:
             states = np.empty(
@@ -156,7 +161,6 @@ class ReplayBuffer:
                 next_states[i] = h5_file["next_states"][index]
                 dones[i] = h5_file["dones"][index]
 
-        self.lock.release()
         return list(zip(states, actions, rewards, next_states, dones))
 
     def _init_h5_file(self):
@@ -173,7 +177,6 @@ class ReplayBuffer:
         done_shape = (self.max_size,)
 
         with h5.File(self.h5_path, "w") as h5_file:
-
             h5_file.create_dataset(
                 "states",
                 shape=state_shape,

@@ -1,6 +1,7 @@
 videos/
 checkpoint/
 _vizdoom.ini
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
