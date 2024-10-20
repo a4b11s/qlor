@@ -45,7 +45,7 @@ def train():
     )
 
     screen_shape = envs.single_observation_space["screen"].shape
-    screen_shape = (1, 60, 80)  # (screen_shape[2], screen_shape[0], screen_shape[1])
+    screen_shape = (1, 120, 160)  # (screen_shape[2], screen_shape[0], screen_shape[1])
     action_dim = envs.single_action_space.n
     print("Screen shape:", screen_shape)
     agent = Agent(screen_shape, action_dim)
@@ -58,7 +58,7 @@ def train():
     epsilon = Epsilon(
         start=1.0,
         end=0.01,
-        decay=500,
+        decay=5000,
     )
 
     trainer = Trainer(

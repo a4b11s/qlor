@@ -33,10 +33,10 @@ class Trainer:
         self.epsilon: Epsilon = epsilon
         self.gamma = 0.99
 
-        self.batch_size = 512
+        self.batch_size = 128
 
         self.target_update_frequency = 200
-        self.validation_frequency = 1000
+        self.validation_frequency = 5000
 
         self.print_frequency = 100
         self.save_frequency = 5000
@@ -77,7 +77,7 @@ class Trainer:
         self.transform = transforms.Compose(
             [
                 transforms.Grayscale(),
-                transforms.Resize((60, 80)),
+                transforms.Resize((120, 160)),
             ]
         )
 
