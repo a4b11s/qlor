@@ -2,8 +2,6 @@ import datetime
 import json
 import os
 import random
-import tempfile
-import time
 import numpy as np
 import torch
 import pickle
@@ -16,6 +14,7 @@ from qlor.agent import Agent
 from qlor.autoencoder import Autoencoder
 from qlor.env_model import EnvModel
 from qlor.epsilon import Epsilon
+from qlor.metric import Metric
 
 
 class Trainer(object):
@@ -23,7 +22,17 @@ class Trainer(object):
     step = 0
     start_time = None
     save_path = "checkpoint"
-    metrics = {}
+    metrics = {
+        "epsilon": Metric("epsilon", "set", 0),
+        "step": Metric("step", "set", 0),
+        "buffer_size": Metric("buffer_size", "set", 0),
+        "loss": Metric("loss", "average", 0),
+        "reward": Metric("reward", "average", 0),
+        "env_model_loss": Metric("env_model_loss", "average", 0),
+        "autoencoder_loss": Metric("autoencoder_loss", "average", 0),
+        "elapsed_time": Metric("elapsed_time", "set", 0),
+        "val_reward": Metric("val_reward", "set", 0),
+    }
 
     def __init__(
         self,
@@ -202,7 +211,6 @@ class Trainer(object):
                 batch_size=self.envs.num_envs,
             )
 
-
             self.experience_replay.extend(data_dict)
 
             # if len(self.experience_replay) > self.batch_size * 2:
@@ -221,8 +229,8 @@ class Trainer(object):
                 {
                     "loss": loss,
                     "reward": np.mean(rewards),
-                    "env_model_loss": 0, #env_model_loss,
-                    "autoencoder_loss": 0, #autoencoder_loss,
+                    "env_model_loss": 0,  # env_model_loss,
+                    "autoencoder_loss": 0,  # autoencoder_loss,
                 }
             )
 
@@ -233,20 +241,18 @@ class Trainer(object):
         elapsed_time = datetime.datetime.now() - self.start_time
         self.epsilon.update_epsilon(self.step)
 
-        self.update_metrics("epsilon", self.epsilon(), mode="replace")
-        self.update_metrics("step", self.step, mode="replace")
-        self.update_metrics("buffer_size", len(self.experience_replay), mode="replace")
-        self.update_metrics("loss", logs["loss"], mode="replace")
-        self.update_metrics("reward", logs["reward"], mode="replace")
-        self.update_metrics("env_model_loss", logs["env_model_loss"], mode="replace")
-        self.update_metrics(
-            "autoencoder_loss", logs["autoencoder_loss"], mode="replace"
-        )
-        self.update_metrics("elapsed_time", str(elapsed_time), mode="replace")
+        self.metrics["epsilon"].update(self.epsilon())
+        self.metrics["step"].update(self.step)
+        self.metrics["buffer_size"].update(len(self.experience_replay))
+        self.metrics["loss"].update(logs["loss"])
+        self.metrics["reward"].update(logs["reward"])
+        self.metrics["env_model_loss"].update(logs["env_model_loss"])
+        self.metrics["autoencoder_loss"].update(logs["autoencoder_loss"])
+        self.metrics["elapsed_time"].update(str(elapsed_time))
 
         if self.step % self.validation_frequency == 0:
             val = self.validate()
-            self.update_metrics("val_reward", val, mode="replace")
+            self.metrics["val_reward"].update(val)
 
         if self.step % self.print_frequency == 0 and self.step > 0:
             self.print_metrics()
@@ -317,35 +323,10 @@ class Trainer(object):
     def print_metrics(self):
         print_string = f"Episode: {self.episode}"
 
-        for metric_name, metric_value in self.metrics.items():
-            if metric_name[0] == "_":
-                continue
-
-            if isinstance(metric_value, float):
-                print_string += f", {metric_name}: {metric_value:.3f}"
-            else:
-                print_string += f", {metric_name}: {metric_value}"
+        for metric in self.metrics.values():
+            print_string += str(metric)
 
         print(print_string)
-
-    def update_metrics(self, metrics_name, value, mode="average"):
-        if metrics_name not in self.metrics:
-            self.metrics[metrics_name] = 0
-
-        if mode == "sum":
-            self.metrics[metrics_name] += value
-
-        elif mode == "average":
-            # old_value = self.metrics[metrics_name]
-            # self.metrics[metrics_name] = (old_value + value) / 2
-            if "_" + metrics_name not in self.metrics:
-                self.metrics["_" + metrics_name] = []
-
-            self.metrics["_" + metrics_name].append(value)
-            self.metrics[metrics_name] = np.mean(self.metrics["_" + metrics_name])
-
-        elif mode == "replace":
-            self.metrics[metrics_name] = value
 
     def save_config(self, path):
         with open(path, "wb") as f:
@@ -359,11 +340,15 @@ class Trainer(object):
 
     def save_metrics(self, path):
         with open(path, "wb") as f:
-            pickle.dump(self.metrics, f)
+            pickle.dump(
+                {name: metric.get_config() for name, metric in self.metrics.items()}, f
+            )
 
     def load_metrics(self, path):
         with open(path, "rb") as f:
-            self.metrics = pickle.load(f)
+            metrics = pickle.load(f)
+            for name, config in metrics.items():
+                self.metrics[name].set_config(config)
 
     def save_experience_replay(self, path):
         with open(path, "wb") as f:
