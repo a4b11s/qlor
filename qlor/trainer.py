@@ -23,15 +23,15 @@ class Trainer(object):
     start_time = None
     save_path = "checkpoint"
     metrics = {
-        "epsilon": Metric("epsilon", "set", 0),
-        "step": Metric("step", "set", 0),
-        "buffer_size": Metric("buffer_size", "set", 0),
-        "loss": Metric("loss", "average", 0),
-        "reward": Metric("reward", "average", 0),
-        "env_model_loss": Metric("env_model_loss", "average", 0),
-        "autoencoder_loss": Metric("autoencoder_loss", "average", 0),
-        "elapsed_time": Metric("elapsed_time", "set", 0),
-        "val_reward": Metric("val_reward", "set", 0),
+        "epsilon": Metric("epsilon", "set"),
+        "step": Metric("step", "set"),
+        "buffer_size": Metric("buffer_size", "set"),
+        "loss": Metric("loss", "average"),
+        "reward": Metric("reward", "average"),
+        "env_model_loss": Metric("env_model_loss", "average"),
+        "autoencoder_loss": Metric("autoencoder_loss", "average"),
+        "elapsed_time": Metric("elapsed_time", "set"),
+        "val_reward": Metric("val_reward", "set"),
     }
 
     def __init__(
@@ -217,8 +217,8 @@ class Trainer(object):
             # loss = self.train_agent_on_batch()
             # env_model_loss = self.train_env_model_on_batch()
 
-            # if self.step % self.autoencoder_update_frequency == 0:
-            #     autoencoder_loss = self.train_autoencoder_on_batch()
+            if self.step % self.autoencoder_update_frequency == 0:
+                autoencoder_loss = self.train_autoencoder_on_batch()
 
             observation = next_observations
 
