@@ -48,7 +48,9 @@ class Trainer(object):
         self.action_dim = envs.single_action_space.n
         self.device = device
         self.epsilon: Epsilon = epsilon
-        self.checkpoint_manager = CheckpointManager(self, self.save_path, max_to_keep=5, save_interval=1000)
+        self.checkpoint_manager = CheckpointManager(
+            self, self.save_path, max_to_keep=5, save_interval=1000
+        )
 
         # Hyperparameters
         self.gamma = 0.99
@@ -331,6 +333,10 @@ class Trainer(object):
         config = {field: getattr(self, field) for field in self.config_field}
 
         return config
+
+    def set_config(self, config):
+        for field, value in config.items():
+            setattr(self, field, value)
 
     @staticmethod
     def map_batch(batch, device):
