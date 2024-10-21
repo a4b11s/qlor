@@ -12,6 +12,7 @@ from tensordict.tensordict import TensorDict
 
 from qlor.agent import Agent
 from qlor.autoencoder import Autoencoder
+from qlor.checkpoint_manager import CheckpointManager
 from qlor.env_model import EnvModel
 from qlor.epsilon import Epsilon
 from qlor.metric import Metric
@@ -47,6 +48,7 @@ class Trainer(object):
         self.action_dim = envs.single_action_space.n
         self.device = device
         self.epsilon: Epsilon = epsilon
+        self.checkpoint_manager = CheckpointManager(self, self.save_path, max_to_keep=5, save_interval=1000)
 
         # Hyperparameters
         self.gamma = 0.99
@@ -59,7 +61,6 @@ class Trainer(object):
         # Training parameters
         self.validation_frequency = 5000
         self.print_frequency = 100
-        self.save_frequency = 5000
 
         self.experience_replay = ReplayBuffer(
             storage=LazyMemmapStorage(
@@ -100,7 +101,6 @@ class Trainer(object):
             self.env_model.parameters(), lr=1e-3
         )
         self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=1e-3)
-
         self.criterion = torch.nn.MSELoss()
         self.autoencoder_loss = torch.nn.MSELoss()
         self.env_model_loss = torch.nn.MSELoss()
@@ -250,6 +250,8 @@ class Trainer(object):
         self.metrics["autoencoder_loss"].update(logs["autoencoder_loss"])
         self.metrics["elapsed_time"].update(str(elapsed_time))
 
+        self.checkpoint_manager.on_step(self.step)
+
         if self.step % self.validation_frequency == 0:
             val = self.validate()
             self.metrics["val_reward"].update(val)
@@ -259,9 +261,6 @@ class Trainer(object):
 
         if self.step % self.target_update_frequency == 0 and self.step > 0:
             self.target_agent.load_state_dict(self.agent.state_dict())
-
-        if self.step % self.save_frequency == 0 and self.step > 0:
-            self.save(self.save_path)
 
     def validate(self, max_steps=1000):
         observation, _ = self.val_env.reset()
@@ -328,77 +327,10 @@ class Trainer(object):
 
         print(print_string)
 
-    def save_config(self, path):
-        with open(path, "wb") as f:
-            pickle.dump({field: getattr(self, field) for field in self.config_field}, f)
+    def get_config(self):
+        config = {field: getattr(self, field) for field in self.config_field}
 
-    def load_config(self, path):
-        with open(path, "rb") as f:
-            config = pickle.load(f)
-            for field, value in config.items():
-                setattr(self, field, value)
-
-    def save_metrics(self, path):
-        with open(path, "wb") as f:
-            pickle.dump(
-                {name: metric.get_config() for name, metric in self.metrics.items()}, f
-            )
-
-    def load_metrics(self, path):
-        with open(path, "rb") as f:
-            metrics = pickle.load(f)
-            for name, config in metrics.items():
-                self.metrics[name].set_config(config)
-
-    def save_experience_replay(self, path):
-        with open(path, "wb") as f:
-            pickle.dump(self.experience_replay, f)
-
-    def load_experience_replay(self, path):
-        with open(path, "rb") as f:
-            self.experience_replay = pickle.load(f)
-
-    def save_agent(self, path):
-        torch.save(self.agent.state_dict(), path)
-
-    def load_agent(self, path):
-        dict = torch.load(path)
-        self.agent.load_state_dict(dict)
-        self.target_agent.load_state_dict(dict)
-
-    def save(self, path):
-        return  # Disable saving for now
-        print(f"Saving checkpoint to {path}")
-
-        if not os.path.exists(path):
-            os.makedirs(path)
-
-        manifest = {
-            "config_path": path + "/config.pkl",
-            "metrics_path": path + "/metrics.pkl",
-            "experience_replay_path": path + "/experience_replay.pkl",
-            "agent_path": path + "/agent.pth",
-            "datetime": str(datetime.datetime.now()),
-        }
-
-        self.save_config(manifest["config_path"])
-        self.save_metrics(manifest["metrics_path"])
-        # self.save_experience_replay(manifest["experience_replay_path"])
-        self.save_agent(manifest["agent_path"])
-
-        with open(path + "/manifest.json", "w") as f:
-            f.write(json.dumps(manifest, indent=4))
-
-        print("Checkpoint saved")
-
-    def load(self, path):
-        with open(path + "/manifest.json", "r") as f:
-            manifest = json.loads(f.read())
-
-        self.load_config(manifest["config_path"])
-        self.load_metrics(manifest["metrics_path"])
-        # self.load_experience_replay(manifest["experience_replay_path"])
-        self.load_agent(manifest["agent_path"])
+        return config
 
     @staticmethod
     def map_batch(batch, device):
