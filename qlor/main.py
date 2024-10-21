@@ -1,6 +1,7 @@
 import logging
 import multiprocessing
 import os
+import tempfile
 import time
 import gymnasium
 import numpy as np
@@ -46,14 +47,7 @@ def train():
 
     screen_shape = envs.single_observation_space["screen"].shape
     screen_shape = (1, 120, 160)  # (screen_shape[2], screen_shape[0], screen_shape[1])
-    action_dim = envs.single_action_space.n
     print("Screen shape:", screen_shape)
-    agent = Agent(screen_shape, action_dim)
-    target_agent = Agent(screen_shape, action_dim).to(device)
-    target_agent.load_state_dict(agent.state_dict())
-
-    optimizer = optim.Adam(agent.parameters(), lr=1e-3)
-    criterion = nn.MSELoss()
 
     epsilon = Epsilon(
         start=1.0,
@@ -61,24 +55,22 @@ def train():
         decay=5000,
     )
 
-    trainer = Trainer(
-        agent=agent,
-        target_agent=target_agent,
-        envs=envs,
-        val_env=val_env,
-        optimizer=optimizer,
-        epsilon=epsilon,
-        criterion=criterion,
-        device=device,
-    )
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        trainer = Trainer(
+            envs=envs,
+            val_env=val_env,
+            epsilon=epsilon,
+            replay_buffer_path=tmpdirname,
+            device=device,
+        )
 
-    try:
-        trainer.load("checkpoint")
-        print("Checkpoint loaded.")
-    except FileNotFoundError:
-        print("Checkpoint not found. Starting from scratch.")
+        try:
+            trainer.load("checkpoint")
+            print("Checkpoint loaded.")
+        except FileNotFoundError:
+            print("Checkpoint not found. Starting from scratch.")
 
-    trainer.train()
+        trainer.train()
 
 
 if __name__ == "__main__":

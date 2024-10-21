@@ -2,8 +2,8 @@ import datetime
 import json
 import os
 import random
+import tempfile
 import time
-from matplotlib import pyplot as plt
 import numpy as np
 import torch
 import pickle
@@ -12,62 +12,59 @@ from torchvision import transforms
 from torchrl.data import ReplayBuffer, LazyMemmapStorage, SamplerWithoutReplacement
 from tensordict.tensordict import TensorDict
 
+from qlor.agent import Agent
+from qlor.autoencoder import Autoencoder
+from qlor.env_model import EnvModel
 from qlor.epsilon import Epsilon
 
 
-class Trainer:
-    def __init__(
-        self, agent, target_agent, envs, val_env, optimizer, epsilon, criterion, device
-    ):
-        self.agent: torch.nn.Module = agent
-        self.target_agent: torch.nn.Module = target_agent
+class Trainer(object):
+    episode = 0
+    step = 0
+    start_time = None
+    save_path = "checkpoint"
+    metrics = {}
 
+    def __init__(
+        self,
+        envs,
+        val_env,
+        epsilon,
+        replay_buffer_path,
+        device,
+    ):
         self.envs = envs
         self.val_env = val_env
         self.action_dim = envs.single_action_space.n
-
-        self.optimizer = optimizer
-        self.criterion = criterion
         self.device = device
-
         self.epsilon: Epsilon = epsilon
+
+        # Hyperparameters
         self.gamma = 0.99
-
+        self.hidden_dim = 256
         self.batch_size = 128
+        self.experience_replay_maxlen = 2_000_000
+        self.target_update_frequency = 1000
+        self.autoencoder_update_frequency = 100
 
-        self.target_update_frequency = 200
+        # Training parameters
         self.validation_frequency = 5000
-
         self.print_frequency = 100
         self.save_frequency = 5000
-        self.experience_replay_maxlen = 2_000_000
-
-        self.episode = 0
-        self.step = 0
-
-        self.start_time = None
-
-        screen_shape = envs.single_observation_space["screen"].shape
-        screen_shape = (screen_shape[2], screen_shape[0], screen_shape[1])
 
         self.experience_replay = ReplayBuffer(
             storage=LazyMemmapStorage(
                 max_size=self.experience_replay_maxlen,
-                scratch_dir="./data/scratch",
+                scratch_dir=replay_buffer_path,
             ),
             batch_size=self.batch_size,
             prefetch=4,
             sampler=SamplerWithoutReplacement(),
         )
 
-        self.save_path = "checkpoint"
-
-        self.metrics = {}
-
         self.config_field = [
             "optimizer",
             "criterion",
-            "device",
             "epsilon",
             "step",
             "episode",
@@ -81,18 +78,37 @@ class Trainer:
             ]
         )
 
-    def train_batch(self, batch_size):
-        batch = self.experience_replay.sample().to(self.device)
+        self.autoencoder = Autoencoder((1, 120, 160), self.hidden_dim).to(device)
+        self.env_model = EnvModel(self.hidden_dim, self.action_dim).to(device)
+        self.agent = Agent(self.hidden_dim, self.action_dim).to(device)
+        self.target_agent = Agent(self.hidden_dim, self.action_dim).to(device)
+        self.target_agent.load_state_dict(self.agent.state_dict())
 
-        # state_batch, action_batch, reward_batch, next_state_batch, done_batch = (
-        #     self.map_batch(batch, self.device)
-        # )
+        self.autoencoder_optimizer = torch.optim.Adam(
+            self.autoencoder.parameters(), lr=1e-3
+        )
+        self.env_model_optimizer = torch.optim.Adam(
+            self.env_model.parameters(), lr=1e-3
+        )
+        self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=1e-3)
+
+        self.criterion = torch.nn.MSELoss()
+        self.autoencoder_loss = torch.nn.MSELoss()
+        self.env_model_loss = torch.nn.MSELoss()
+
+    def train_agent_on_batch(self, batch_size=None):
+        if batch_size is None:
+            batch_size = self.batch_size
+
+        batch = self.experience_replay.sample(batch_size).to(self.device)
 
         state_batch = batch["observation"]
         action_batch = batch["action"]
         reward_batch = batch["rewards"]
         next_state_batch = batch["next_observation"]
         done_batch = batch["done"]
+
+        self.agent.train()
 
         # Current Q values
         policy_batch = self.agent(state_batch)
@@ -108,6 +124,50 @@ class Trainer:
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+        self.agent.eval()
+
+        return loss.item()
+
+    def train_autoencoder_on_batch(self, batch_size=None):
+        if batch_size is None:
+            batch_size = self.batch_size
+
+        batch = self.experience_replay.sample(batch_size).to(self.device)
+
+        state_batch = batch["observation"]
+
+        self.autoencoder.train()
+        decoded = self.autoencoder(state_batch)
+
+        loss = self.autoencoder_loss(decoded, state_batch)
+
+        self.autoencoder_optimizer.zero_grad()
+        loss.backward()
+        self.autoencoder_optimizer.step()
+        self.autoencoder.eval()
+
+        return loss.item()
+
+    def train_env_model_on_batch(self, batch_size=None):
+        if batch_size is None:
+            batch_size = self.batch_size
+
+        batch = self.experience_replay.sample(batch_size).to(self.device)
+
+        state_batch = batch["observation"]
+        action_batch = batch["action"]
+        next_state_batch = batch["next_observation"]
+
+        self.env_model.train()
+        input = torch.cat([state_batch, action_batch], dim=1)
+        predicted_next_state = self.env_model(input)
+
+        loss = self.env_model_loss(predicted_next_state, next_state_batch)
+
+        self.env_model_optimizer.zero_grad()
+        loss.backward()
+        self.env_model_optimizer.step()
+        self.env_model.eval()
 
         return loss.item()
 
@@ -119,10 +179,10 @@ class Trainer:
         loss = 0
 
         observation = self.augment_observation(observation)  # bschw
-        
+
         while self.step < max_steps:
             current_state = observation
-            policy = self.agent(current_state)
+            policy = torch.zeros(32, self.action_dim)  # self.agent(current_state)
             actions = self.epsilon_greedy_action(policy, self.epsilon())
             next_observations, rewards, terminateds, truncateds, _ = self.envs.step(
                 actions
@@ -142,40 +202,46 @@ class Trainer:
                 batch_size=self.envs.num_envs,
             )
 
+
             self.experience_replay.extend(data_dict)
 
-            if len(self.experience_replay) > self.batch_size * 2:
-                loss = self.train_batch(self.batch_size)
-                pass
+            # if len(self.experience_replay) > self.batch_size * 2:
+            # loss = self.train_agent_on_batch()
+            # env_model_loss = self.train_env_model_on_batch()
+
+            # if self.step % self.autoencoder_update_frequency == 0:
+            #     autoencoder_loss = self.train_autoencoder_on_batch()
 
             observation = next_observations
-
-            self.update_metrics("loss", loss, mode="replace")
-            self.update_metrics("reward", np.mean(rewards), mode="replace")
-            self.update_metrics("avg_loss", loss, mode="average")
-            self.update_metrics("avg_reward", np.mean(rewards), mode="average")
 
             if np.any(terminateds) or np.any(truncateds):
                 self.episode += 1
 
-            self.on_step_end()
+            self.on_step_end(
+                {
+                    "loss": loss,
+                    "reward": np.mean(rewards),
+                    "env_model_loss": 0, #env_model_loss,
+                    "autoencoder_loss": 0, #autoencoder_loss,
+                }
+            )
 
-    def on_step_end(self):
+    def on_step_end(self, logs):
         torch.cuda.empty_cache()
 
         self.step += 1
+        elapsed_time = datetime.datetime.now() - self.start_time
         self.epsilon.update_epsilon(self.step)
 
         self.update_metrics("epsilon", self.epsilon(), mode="replace")
         self.update_metrics("step", self.step, mode="replace")
         self.update_metrics("buffer_size", len(self.experience_replay), mode="replace")
-        # self.update_metrics(
-        #     "prefetch_size",
-        #     self.experience_replay.prefetcher.prefetch_batches.qsize(),
-        #     mode="replace",
-        # )
-
-        elapsed_time = datetime.datetime.now() - self.start_time
+        self.update_metrics("loss", logs["loss"], mode="replace")
+        self.update_metrics("reward", logs["reward"], mode="replace")
+        self.update_metrics("env_model_loss", logs["env_model_loss"], mode="replace")
+        self.update_metrics(
+            "autoencoder_loss", logs["autoencoder_loss"], mode="replace"
+        )
         self.update_metrics("elapsed_time", str(elapsed_time), mode="replace")
 
         if self.step % self.validation_frequency == 0:
@@ -222,6 +288,9 @@ class Trainer:
             )
 
         return target_q_values
+
+    def mpc_planning(self, state, horizon=10):
+        raise NotImplementedError
 
     def epsilon_greedy_action(self, policy, epsilon):
         actions = []
@@ -313,6 +382,7 @@ class Trainer:
         self.target_agent.load_state_dict(dict)
 
     def save(self, path):
+        return  # Disable saving for now
         print(f"Saving checkpoint to {path}")
 
         if not os.path.exists(path):
