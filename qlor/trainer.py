@@ -11,7 +11,7 @@ from qlor.agent import Agent
 from qlor.autoencoder import Autoencoder
 from qlor.checkpoint_manager import CheckpointManager
 from qlor.epsilon import Epsilon
-from qlor.metric import Metric
+from qlor.metrics_manager import MetricsManager
 
 
 class Trainer(object):
@@ -19,16 +19,6 @@ class Trainer(object):
     step = 0
     start_time = None
     save_path = "checkpoint"
-    metrics = {
-        "epsilon": Metric("epsilon", "set"),
-        "step": Metric("step", "set"),
-        "buffer_size": Metric("buffer_size", "set"),
-        "loss": Metric("loss", "average"),
-        "reward": Metric("reward", "average"),
-        "autoencoder_loss": Metric("autoencoder_loss", "average"),
-        "elapsed_time": Metric("elapsed_time", "set"),
-        "val_reward": Metric("val_reward", "set"),
-    }
 
     def __init__(
         self,
@@ -97,6 +87,19 @@ class Trainer(object):
         self.criterion = torch.nn.MSELoss()
         self.autoencoder_loss = torch.nn.MSELoss()
         self.env_model_loss = torch.nn.MSELoss()
+
+        self.metrics_manager = MetricsManager(
+            [
+                {"name": "Episode", "mode": "set"},
+                {"name": "epsilon", "mode": "set"},
+                {"name": "step", "mode": "set"},
+                {"name": "loss", "mode": "average"},
+                {"name": "autoencoder_loss", "mode": "average"},
+                {"name": "reward", "mode": "average"},
+                {"name": "elapsed_time", "mode": "set"},
+                {"name": "val_reward", "mode": "set"},
+            ]
+        )
 
     def sample_batch(self, batch_size=None):
         if batch_size is None:
@@ -185,26 +188,28 @@ class Trainer(object):
         elapsed_time = datetime.datetime.now() - self.start_time
         self.epsilon.update_epsilon(self.step)
 
-        self.metrics["epsilon"].update(self.epsilon())
-        self.metrics["step"].update(self.step)
-        self.metrics["buffer_size"].update(len(self.experience_replay))
-        self.metrics["loss"].update(logs["loss"])
-        self.metrics["reward"].update(logs["reward"])
-        self.metrics["autoencoder_loss"].update(logs["autoencoder_loss"])
-        self.metrics["elapsed_time"].update(str(elapsed_time))
+        self.metrics_manager.update_many(
+            {
+                "Episode": self.episode,
+                "epsilon": self.epsilon(),
+                "step": self.step,
+                "elapsed_time": str(elapsed_time),
+                **logs,
+            }
+        )
 
         self.checkpoint_manager.on_step(self.step)
 
         if self.step % self.validation_frequency == 0:
             val = self.validate()
-            self.metrics["val_reward"].update(val)
+            self.metrics_manager.update_metric("val_reward", val)
 
         self._update_target_agent_if_needed()
         self._print_metrics_if_needed()
 
     def _print_metrics_if_needed(self):
         if self.step % self.print_frequency == 0 and self.step > 0:
-            self.print_metrics()
+            print(self.metrics_manager.get_string(" "))
 
     def _update_target_agent_if_needed(self):
         if self.step % self.target_update_frequency == 0 and self.step > 0:
@@ -292,14 +297,6 @@ class Trainer(object):
         screen = self.transform(screen)
 
         return screen / 255.0
-
-    def print_metrics(self):
-        print_string = f"Episode: {self.episode} "
-
-        for metric in self.metrics.values():
-            print_string += str(metric) + " "
-
-        print(print_string)
 
     def get_config(self):
         config = {field: getattr(self, field) for field in self.config_field}
