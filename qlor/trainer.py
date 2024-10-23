@@ -110,25 +110,19 @@ class Trainer(object):
         next_state_batch = batch["next_observation"]
         done_batch = batch["done"]
 
-        self.agent.train()
+        state_batch = self.autoencoder.encoder(state_batch)
+        next_state_batch = self.autoencoder.encoder(next_state_batch)
 
-        # Current Q values
-        policy_batch = self.agent(state_batch)
-
-        current_q_values = policy_batch.gather(1, action_batch.unsqueeze(1)).squeeze(1)
-
-        target_q_values = self.calculate_target_q_values(
-            next_state_batch, reward_batch, done_batch
+        return self.agent.train_on_batch(
+            state_batch=state_batch,
+            action_batch=action_batch,
+            reward_batch=reward_batch,
+            next_state_batch=next_state_batch,
+            done_batch=done_batch,
+            criterion=self.criterion,
+            optimizer=self.optimizer,
+            calculate_target_q_values=self.calculate_target_q_values,
         )
-
-        loss = self.criterion(current_q_values, target_q_values)
-
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        self.agent.eval()
-
-        return loss.item()
 
     def train_autoencoder_on_batch(self, batch_size=None):
         if batch_size is None:
@@ -138,11 +132,13 @@ class Trainer(object):
 
         state_batch = batch["observation"]
 
-        self.autoencoder.train_on_batch(
+        loss = self.autoencoder.train_on_batch(
             state_batch=state_batch,
             optimizer=self.autoencoder_optimizer,
             loss_fn=self.autoencoder_loss,
         )
+
+        return loss
 
     def train(self, max_steps=1_000_000):
         if self.start_time is None:
