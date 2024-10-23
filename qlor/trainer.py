@@ -98,11 +98,16 @@ class Trainer(object):
         self.autoencoder_loss = torch.nn.MSELoss()
         self.env_model_loss = torch.nn.MSELoss()
 
-    def train_agent_on_batch(self, batch_size=None):
+    def sample_batch(self, batch_size=None):
         if batch_size is None:
             batch_size = self.batch_size
 
         batch = self.experience_replay.sample(batch_size).to(self.device)
+
+        return batch
+
+    def train_agent_on_batch(self, batch_size=None):
+        batch = self.sample_batch(batch_size)
 
         state_batch = batch["observation"]
         action_batch = batch["action"]
@@ -123,22 +128,6 @@ class Trainer(object):
             optimizer=self.optimizer,
             calculate_target_q_values=self.calculate_target_q_values,
         )
-
-    def train_autoencoder_on_batch(self, batch_size=None):
-        if batch_size is None:
-            batch_size = self.batch_size
-
-        batch = self.experience_replay.sample(batch_size).to(self.device)
-
-        state_batch = batch["observation"]
-
-        loss = self.autoencoder.train_on_batch(
-            state_batch=state_batch,
-            optimizer=self.autoencoder_optimizer,
-            loss_fn=self.autoencoder_loss,
-        )
-
-        return loss
 
     def train(self, max_steps=1_000_000):
         if self.start_time is None:
@@ -177,7 +166,12 @@ class Trainer(object):
                 loss = self.train_agent_on_batch()
 
             if self.step % self.autoencoder_update_frequency == 0:
-                autoencoder_loss = self.train_autoencoder_on_batch()
+                batch = self.sample_batch()
+                autoencoder_loss = self.autoencoder.train_on_batch(
+                    state_batch=batch["observation"],
+                    optimizer=self.autoencoder_optimizer,
+                    loss_fn=self.autoencoder_loss,
+                )
 
             observation = next_observations
 
@@ -189,7 +183,7 @@ class Trainer(object):
                     "loss": loss,
                     "reward": np.mean(rewards),
                     "env_model_loss": 0,  # env_model_loss,
-                    "autoencoder_loss": 0,  # autoencoder_loss,
+                    "autoencoder_loss": autoencoder_loss,
                 }
             )
 
@@ -278,7 +272,7 @@ class Trainer(object):
         print_string = f"Episode: {self.episode}"
 
         for metric in self.metrics.values():
-            print_string += str(metric)
+            print_string += str(metric) + " "
 
         print(print_string)
 
