@@ -12,26 +12,29 @@ class CheckpointManager:
         self.max_to_keep = max_to_keep
         self.save_interval = save_interval
 
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
     def on_step(self, step):
         if step % self.save_interval == 0 and step > 0:
             self.save(step)
 
     def _save_trainer_config(self, step):
         trainer_config_path = os.path.join(
-            self.checkpoint_dir, f"trainer_config_{step}.json"
+            self.checkpoint_dir, f"trainer_config_{step}.pkl"
         )
-        with open(trainer_config_path, "w") as f:
-            json.dump(self.trainer.get_config(), f)
+
+        with open(trainer_config_path, "wb") as f:
+            pickle.dump(self.trainer.get_config(), f)
 
         return trainer_config_path
 
     def _save_metrics(self, step):
         metrics_path = os.path.join(self.checkpoint_dir, f"metrics_{step}.pkl")
 
-        metrics = {metric.name: metric.get_config() for metric in self.trainer.metrics}
+        metrics_config = self.trainer.metrics_manager.get_config()
 
         with open(metrics_path, "wb") as f:
-            pickle.dump(metrics, f)
+            pickle.dump(metrics_config, f)
 
         return metrics_path
 
@@ -46,20 +49,16 @@ class CheckpointManager:
 
     def _save_networks(self, step):
         agent = self.trainer.agent
-        env_model = self.trainer.env_model
         autoencoder = self.trainer.autoencoder
 
         agent_path = os.path.join(self.checkpoint_dir, f"agent_{step}.pth")
-        env_model_path = os.path.join(self.checkpoint_dir, f"env_model_{step}.pth")
         autoencoder_path = os.path.join(self.checkpoint_dir, f"autoencoder_{step}.pth")
 
         torch.save(agent.state_dict(), agent_path)
-        torch.save(env_model.state_dict(), env_model_path)
         torch.save(autoencoder.state_dict(), autoencoder_path)
 
         return {
             "agent": agent_path,
-            "env_model": env_model_path,
             "autoencoder": autoencoder_path,
         }
 
