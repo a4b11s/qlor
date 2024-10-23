@@ -129,9 +129,12 @@ class Trainer(object):
             calculate_target_q_values=self.calculate_target_q_values,
         )
 
-    def train(self, max_steps=1_000_000):
+    def initialize_training(self):
         if self.start_time is None:
             self.start_time = datetime.datetime.now()
+
+    def train(self, max_steps=1_000_000):
+        self.initialize_training()
 
         observation, _ = self.envs.reset()
         loss = 0
@@ -156,9 +159,8 @@ class Trainer(object):
                 loss = self.train_agent_on_batch()
 
             if self.step % self.autoencoder_update_frequency == 0:
-                batch = self.sample_batch()
                 autoencoder_loss = self.autoencoder.train_on_batch(
-                    state_batch=batch["observation"],
+                    state_batch=self.sample_batch()["observation"],
                     optimizer=self.autoencoder_optimizer,
                     loss_fn=self.autoencoder_loss,
                 )
@@ -197,9 +199,14 @@ class Trainer(object):
             val = self.validate()
             self.metrics["val_reward"].update(val)
 
+        self._update_target_agent_if_needed()
+        self._print_metrics_if_needed()
+
+    def _print_metrics_if_needed(self):
         if self.step % self.print_frequency == 0 and self.step > 0:
             self.print_metrics()
 
+    def _update_target_agent_if_needed(self):
         if self.step % self.target_update_frequency == 0 and self.step > 0:
             self.target_agent.load_state_dict(self.agent.state_dict())
 
