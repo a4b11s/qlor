@@ -29,7 +29,6 @@ class Trainer(object):
         "buffer_size": Metric("buffer_size", "set"),
         "loss": Metric("loss", "average"),
         "reward": Metric("reward", "average"),
-        "env_model_loss": Metric("env_model_loss", "average"),
         "autoencoder_loss": Metric("autoencoder_loss", "average"),
         "elapsed_time": Metric("elapsed_time", "set"),
         "val_reward": Metric("val_reward", "set"),
@@ -91,7 +90,6 @@ class Trainer(object):
         )
 
         self.autoencoder = Autoencoder((1, 120, 160), self.hidden_dim).to(device)
-        self.env_model = EnvModel(self.hidden_dim, self.action_dim).to(device)
         self.agent = Agent(self.hidden_dim, self.action_dim).to(device)
         self.target_agent = Agent(self.hidden_dim, self.action_dim).to(device)
         self.target_agent.load_state_dict(self.agent.state_dict())
@@ -159,29 +157,6 @@ class Trainer(object):
 
         return loss.item()
 
-    def train_env_model_on_batch(self, batch_size=None):
-        if batch_size is None:
-            batch_size = self.batch_size
-
-        batch = self.experience_replay.sample(batch_size).to(self.device)
-
-        state_batch = batch["observation"]
-        action_batch = batch["action"]
-        next_state_batch = batch["next_observation"]
-
-        self.env_model.train()
-        input = torch.cat([state_batch, action_batch], dim=1)
-        predicted_next_state = self.env_model(input)
-
-        loss = self.env_model_loss(predicted_next_state, next_state_batch)
-
-        self.env_model_optimizer.zero_grad()
-        loss.backward()
-        self.env_model_optimizer.step()
-        self.env_model.eval()
-
-        return loss.item()
-
     def train(self, max_steps=1_000_000):
         if self.start_time is None:
             self.start_time = datetime.datetime.now()
@@ -215,9 +190,8 @@ class Trainer(object):
 
             self.experience_replay.extend(data_dict)
 
-            # if len(self.experience_replay) > self.batch_size * 2:
-            # loss = self.train_agent_on_batch()
-            # env_model_loss = self.train_env_model_on_batch()
+            if len(self.experience_replay) > self.batch_size * 2:
+                loss = self.train_agent_on_batch()
 
             if self.step % self.autoencoder_update_frequency == 0:
                 autoencoder_loss = self.train_autoencoder_on_batch()
@@ -296,9 +270,6 @@ class Trainer(object):
 
         return target_q_values
 
-    def mpc_planning(self, state, horizon=10):
-        raise NotImplementedError
-
     def epsilon_greedy_action(self, policy, epsilon):
         actions = []
         for p in policy:
@@ -337,15 +308,3 @@ class Trainer(object):
     def set_config(self, config):
         for field, value in config.items():
             setattr(self, field, value)
-
-    @staticmethod
-    def map_batch(batch, device):
-        state_batch = torch.tensor(batch["state"], dtype=torch.float32, device=device)
-        action_batch = torch.tensor(batch["action"], device=device).long()
-        reward_batch = torch.tensor(batch["reward"], device=device, dtype=torch.float32)
-        next_state_batch = torch.tensor(
-            batch["next_state"], dtype=torch.float32, device=device
-        )
-        done_batch = torch.tensor(batch["done"], device=device, dtype=torch.float32)
-
-        return state_batch, action_batch, reward_batch, next_state_batch, done_batch
