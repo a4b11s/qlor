@@ -93,9 +93,6 @@ class Trainer(object):
         self.autoencoder_optimizer = torch.optim.Adam(
             self.autoencoder.parameters(), lr=1e-3
         )
-        self.env_model_optimizer = torch.optim.Adam(
-            self.env_model.parameters(), lr=1e-3
-        )
         self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=1e-3)
         self.criterion = torch.nn.MSELoss()
         self.autoencoder_loss = torch.nn.MSELoss()
@@ -141,17 +138,11 @@ class Trainer(object):
 
         state_batch = batch["observation"]
 
-        self.autoencoder.train()
-        decoded = self.autoencoder(state_batch)
-
-        loss = self.autoencoder_loss(decoded, state_batch)
-
-        self.autoencoder_optimizer.zero_grad()
-        loss.backward()
-        self.autoencoder_optimizer.step()
-        self.autoencoder.eval()
-
-        return loss.item()
+        self.autoencoder.train_on_batch(
+            state_batch=state_batch,
+            optimizer=self.autoencoder_optimizer,
+            loss_fn=self.autoencoder_loss,
+        )
 
     def train(self, max_steps=1_000_000):
         if self.start_time is None:
@@ -218,7 +209,6 @@ class Trainer(object):
         self.metrics["buffer_size"].update(len(self.experience_replay))
         self.metrics["loss"].update(logs["loss"])
         self.metrics["reward"].update(logs["reward"])
-        self.metrics["env_model_loss"].update(logs["env_model_loss"])
         self.metrics["autoencoder_loss"].update(logs["autoencoder_loss"])
         self.metrics["elapsed_time"].update(str(elapsed_time))
 
