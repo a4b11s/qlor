@@ -140,27 +140,17 @@ class Trainer(object):
 
         while self.step < max_steps:
             current_state = observation
-            policy = torch.zeros(32, self.action_dim)  # self.agent(current_state)
+            encoded_state = self.autoencoder.encoder(current_state)
+            policy = self.agent(encoded_state)
             actions = self.epsilon_greedy_action(policy, self.epsilon())
-            next_observations, rewards, terminateds, truncateds, _ = self.envs.step(
-                actions
+            next_observations, rewards, done_flags = self.execute_actions(actions)
+            self.store_experience(
+                current_state=current_state,
+                next_observations=next_observations,
+                actions=actions,
+                rewards=rewards,
+                done_flags=done_flags,
             )
-
-            next_observations = self.augment_observation(next_observations)
-
-            data_dict = TensorDict(
-                {
-                    "observation": current_state,
-                    "next_observation": next_observations,
-                    "action": torch.tensor(actions),
-                    "rewards": torch.tensor(rewards, dtype=torch.float32),
-                    "done": torch.tensor(terminateds) | torch.tensor(truncateds),
-                },
-                device=self.device,
-                batch_size=self.envs.num_envs,
-            )
-
-            self.experience_replay.extend(data_dict)
 
             if len(self.experience_replay) > self.batch_size * 2:
                 loss = self.train_agent_on_batch()
@@ -175,14 +165,13 @@ class Trainer(object):
 
             observation = next_observations
 
-            if np.any(terminateds) or np.any(truncateds):
+            if np.any(done_flags):
                 self.episode += 1
 
             self.on_step_end(
                 {
                     "loss": loss,
                     "reward": np.mean(rewards),
-                    "env_model_loss": 0,  # env_model_loss,
                     "autoencoder_loss": autoencoder_loss,
                 }
             )
@@ -213,6 +202,35 @@ class Trainer(object):
 
         if self.step % self.target_update_frequency == 0 and self.step > 0:
             self.target_agent.load_state_dict(self.agent.state_dict())
+
+    def execute_actions(self, actions):
+        next_observations, rewards, terminateds, truncateds, _ = self.envs.step(actions)
+        next_observations = self.augment_observation(next_observations)
+
+        return next_observations, rewards, terminateds | truncateds
+
+    def store_experience(
+        self, current_state, next_observations, actions, rewards, done_flags
+    ):
+        data_dict = self.create_data_dict(
+            current_state, next_observations, actions, rewards, done_flags
+        )
+        self.experience_replay.extend(data_dict)
+
+    def create_data_dict(
+        self, current_state, next_observations, actions, rewards, done_flags
+    ):
+        return TensorDict(
+            {
+                "observation": current_state,
+                "next_observation": next_observations,
+                "action": torch.tensor(actions),
+                "rewards": torch.tensor(rewards, dtype=torch.float32),
+                "done": torch.tensor(done_flags),
+            },
+            device=self.device,
+            batch_size=self.envs.num_envs,
+        )
 
     def validate(self, max_steps=1000):
         observation, _ = self.val_env.reset()
@@ -269,7 +287,7 @@ class Trainer(object):
         return screen / 255.0
 
     def print_metrics(self):
-        print_string = f"Episode: {self.episode}"
+        print_string = f"Episode: {self.episode} "
 
         for metric in self.metrics.values():
             print_string += str(metric) + " "
