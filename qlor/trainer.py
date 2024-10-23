@@ -1,10 +1,7 @@
 import datetime
-import json
-import os
 import random
 import numpy as np
 import torch
-import pickle
 
 from torchvision import transforms
 from torchrl.data import ReplayBuffer, LazyMemmapStorage, SamplerWithoutReplacement
@@ -13,7 +10,6 @@ from tensordict.tensordict import TensorDict
 from qlor.agent import Agent
 from qlor.autoencoder import Autoencoder
 from qlor.checkpoint_manager import CheckpointManager
-from qlor.env_model import EnvModel
 from qlor.epsilon import Epsilon
 from qlor.metric import Metric
 
