@@ -31,3 +31,11 @@ class MetricsManager:
 
     def __str__(self) -> str:
         return self.get_string(" | ")
+
+    def get_config(self) -> dict:
+        return {"metrics": [metric.get_config() for metric in self.metrics.values()]}
+
+    def set_config(self, config: dict) -> None:
+        for metric_config in config["metrics"]:
+            self.add_metric(metric_config["name"], metric_config["mode"])
+            self.metrics[metric_config["name"]].set_config(metric_config)
