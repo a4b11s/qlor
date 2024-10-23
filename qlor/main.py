@@ -64,11 +64,11 @@ def train():
             device=device,
         )
 
-        try:
-            trainer.load("checkpoint")
-            print("Checkpoint loaded.")
-        except FileNotFoundError:
-            print("Checkpoint not found. Starting from scratch.")
+        # try:
+        #     trainer.load("checkpoint")
+        #     print("Checkpoint loaded.")
+        # except FileNotFoundError:
+        #     print("Checkpoint not found. Starting from scratch.")
 
         trainer.train()
 

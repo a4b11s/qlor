@@ -4,12 +4,10 @@ import pickle
 
 import torch
 
-from qlor.trainer import Trainer
-
 
 class CheckpointManager:
     def __init__(self, trainer, checkpoint_dir, max_to_keep=None, save_interval=1000):
-        self.trainer: Trainer = trainer
+        self.trainer = trainer
         self.checkpoint_dir = checkpoint_dir
         self.max_to_keep = max_to_keep
         self.save_interval = save_interval
