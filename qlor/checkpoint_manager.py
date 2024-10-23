@@ -65,13 +65,14 @@ class CheckpointManager:
     def save(self, step):
         trainer_config_path = self._save_trainer_config(step)
         metrics_path = self._save_metrics(step)
-        experience_replay_path = self._save_experience_replay(step)
+        # TODO: Implement experience replay saving. Now it's stoping PC
+        # experience_replay_path = self._save_experience_replay(step)
         networks_path = self._save_networks(step)
 
         manifest = {
             "trainer_config": trainer_config_path,
             "metrics": metrics_path,
-            "experience_replay": experience_replay_path,
+            # "experience_replay": experience_replay_path,
             "networks": networks_path,
             "step": step,
         }
