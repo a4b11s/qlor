@@ -62,7 +62,19 @@ class CheckpointManager:
             "autoencoder": autoencoder_path,
         }
 
+    def _save_hyperparameters(self, step):
+        hyperparameters_path = os.path.join(
+            self.checkpoint_dir, f"hyperparameters_{step}.json"
+        )
+        hyperparameters = self.trainer.hyperparameters.get_config()
+
+        with open(hyperparameters_path, "w") as f:
+            json.dump(hyperparameters, f)
+
+        return hyperparameters_path
+
     def save(self, step):
+        hyperparameters_path = self._save_hyperparameters(step)
         trainer_config_path = self._save_trainer_config(step)
         metrics_path = self._save_metrics(step)
         # TODO: Implement experience replay saving. Now it's stoping PC
@@ -70,6 +82,7 @@ class CheckpointManager:
         networks_path = self._save_networks(step)
 
         manifest = {
+            "hyperparameters": hyperparameters_path,
             "trainer_config": trainer_config_path,
             "metrics": metrics_path,
             # "experience_replay": experience_replay_path,
@@ -109,9 +122,8 @@ class CheckpointManager:
         with open(manifest_path, "r") as f:
             manifest = json.load(f)
 
+        for path in manifest.values():
+            if os.path.exists(path):
+                os.remove(path)
+
         os.remove(manifest_path)
-        os.remove(manifest["trainer_config"])
-        os.remove(manifest["metrics"])
-        os.remove(manifest["experience_replay"])
-        for network in manifest["networks"].values():
-            os.remove(network)
