@@ -41,12 +41,13 @@ class Trainer(object):
         self.gamma = 0.99
         self.hidden_dim = 256
         self.batch_size = 128
+        self.autoencoder_extra_steps = 10
         self.experience_replay_maxlen = 2_000_000
         self.target_update_frequency = 1000
         self.autoencoder_update_frequency = 100
 
         # Training parameters
-        self.validation_frequency = 5000
+        self.validation_frequency = 200
         self.print_frequency = 100
 
         self.experience_replay = ReplayBuffer(
@@ -109,6 +110,21 @@ class Trainer(object):
 
         return batch
 
+    def autoencoder_train_step(self, batch_size=None):
+        loss = []
+
+        for _ in range(self.autoencoder_extra_steps):
+            batch = self.sample_batch(batch_size)
+            state_batch = batch["observation"]
+            step_loss = self.autoencoder.train_on_batch(
+                state_batch=state_batch,
+                optimizer=self.autoencoder_optimizer,
+                loss_fn=self.autoencoder_loss,
+            )
+            loss.append(step_loss)
+
+        return np.mean(loss)
+
     def train_agent_on_batch(self, batch_size=None):
         batch = self.sample_batch(batch_size)
 
@@ -132,12 +148,12 @@ class Trainer(object):
             calculate_target_q_values=self.calculate_target_q_values,
         )
 
-    def initialize_training(self):
+    def _initialize_training(self):
         if self.start_time is None:
             self.start_time = datetime.datetime.now()
 
     def train(self, max_steps=1_000_000):
-        self.initialize_training()
+        self._initialize_training()
 
         observation, _ = self.envs.reset()
         loss = 0
@@ -158,15 +174,11 @@ class Trainer(object):
                 done_flags=done_flags,
             )
 
-            if len(self.experience_replay) > self.batch_size * 2:
+            if self._should_train_agent():
                 loss = self.train_agent_on_batch()
 
-            if self.step % self.autoencoder_update_frequency == 0:
-                autoencoder_loss = self.autoencoder.train_on_batch(
-                    state_batch=self.sample_batch()["observation"],
-                    optimizer=self.autoencoder_optimizer,
-                    loss_fn=self.autoencoder_loss,
-                )
+            if self._should_train_autoencoder():
+                autoencoder_loss = self.autoencoder_train_step()
 
             observation = next_observations
 
@@ -200,7 +212,7 @@ class Trainer(object):
 
         self.checkpoint_manager.on_step(self.step)
 
-        if self.step % self.validation_frequency == 0:
+        if self._should_validate():
             val = self.validate()
             self.metrics_manager.update_metric("val_reward", val)
 
@@ -208,11 +220,11 @@ class Trainer(object):
         self._print_metrics_if_needed()
 
     def _print_metrics_if_needed(self):
-        if self.step % self.print_frequency == 0 and self.step > 0:
+        if self._should_print_metrics():
             print(self.metrics_manager.get_string(" "))
 
     def _update_target_agent_if_needed(self):
-        if self.step % self.target_update_frequency == 0 and self.step > 0:
+        if self._should_update_target_agent():
             self.target_agent.load_state_dict(self.agent.state_dict())
 
     def execute_actions(self, actions):
@@ -250,7 +262,8 @@ class Trainer(object):
 
         while len(rewards) < max_steps:
             current_state = self.augment_observation(observation)
-            policy = self.agent(current_state)
+            hidden_state = self.autoencoder.encoder(current_state)
+            policy = self.agent(hidden_state)
             actions = policy.argmax(dim=1).item()
 
             observation, reward, terminated, truncated, _ = self.val_env.step(actions)
@@ -297,6 +310,21 @@ class Trainer(object):
         screen = self.transform(screen)
 
         return screen / 255.0
+
+    def _should_train_autoencoder(self):
+        return self.step % self.autoencoder_update_frequency == 0
+
+    def _should_train_agent(self):
+        return len(self.experience_replay) > self.batch_size * 2
+
+    def _should_update_target_agent(self):
+        return self.step % self.target_update_frequency == 0 and self.step > 0
+
+    def _should_print_metrics(self):
+        return self.step % self.print_frequency == 0 and self.step > 0
+
+    def _should_validate(self):
+        return self.step % self.validation_frequency == 0
 
     def get_config(self):
         config = {field: getattr(self, field) for field in self.config_field}
