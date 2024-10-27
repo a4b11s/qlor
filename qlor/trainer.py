@@ -219,14 +219,6 @@ class Trainer(object):
         self._update_target_agent_if_needed()
         self._print_metrics_if_needed()
 
-    def _print_metrics_if_needed(self):
-        if self._should_print_metrics():
-            print(self.metrics_manager.get_string(" "))
-
-    def _update_target_agent_if_needed(self):
-        if self._should_update_target_agent():
-            self.target_agent.load_state_dict(self.agent.state_dict())
-
     def execute_actions(self, actions):
         next_observations, rewards, terminateds, truncateds, _ = self.envs.step(actions)
         next_observations = self.augment_observation(next_observations)
@@ -325,6 +317,14 @@ class Trainer(object):
 
     def _should_validate(self):
         return self.step % self.validation_frequency == 0
+
+    def _print_metrics_if_needed(self):
+        if self._should_print_metrics():
+            print(self.metrics_manager.get_string(" "))
+
+    def _update_target_agent_if_needed(self):
+        if self._should_update_target_agent():
+            self.target_agent.load_state_dict(self.agent.state_dict())
 
     def get_config(self):
         config = {field: getattr(self, field) for field in self.config_field}
