@@ -125,7 +125,7 @@ class Trainer(object):
 
         return np.mean(loss)
 
-    def train_agent_on_batch(self, batch_size=None):
+    def agent_train_step(self, batch_size=None):
         batch = self.sample_batch(batch_size)
 
         state_batch = batch["observation"]
@@ -175,7 +175,7 @@ class Trainer(object):
             )
 
             if self._should_train_agent():
-                loss = self.train_agent_on_batch()
+                loss = self.agent_train_step()
 
             if self._should_train_autoencoder():
                 autoencoder_loss = self.autoencoder_train_step()
