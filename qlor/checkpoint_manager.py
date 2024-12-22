@@ -14,6 +14,8 @@ class CheckpointManager:
 
         os.makedirs(checkpoint_dir, exist_ok=True)
 
+        self._keep_max_if_needed()
+
     def on_step(self, step):
         if step % self.save_interval == 0 and step > 0:
             self.save(step)
@@ -38,9 +40,7 @@ class CheckpointManager:
         with open(os.path.join(self.checkpoint_dir, f"manifest_{step}.json"), "w") as f:
             json.dump(manifest, f)
 
-        if self.max_to_keep is not None:
-            while self._count_checkpoints() > self.max_to_keep:
-                self._delete_oldest_checkpoint()
+        self._keep_max_if_needed()
 
         return manifest
 
@@ -186,3 +186,8 @@ class CheckpointManager:
                 os.remove(path)
 
         os.remove(manifest_path)
+
+    def _keep_max_if_needed(self):
+        if self.max_to_keep is not None:
+            while self._count_checkpoints() > self.max_to_keep:
+                self._delete_oldest_checkpoint()
