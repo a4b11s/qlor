@@ -1,13 +1,8 @@
+import datetime
 import logging
 import multiprocessing
 import os
-import tempfile
-import time
 import gymnasium
-import numpy as np
-from vizdoom import gymnasium_wrapper  # This import will register all the environments
-from qlor.agent import Agent
-from torch import nn, optim
 import torch
 
 from qlor.epsilon import Epsilon
@@ -40,7 +35,7 @@ def train():
 
     val_env = gymnasium.wrappers.RecordVideo(
         gymnasium.make(env_id, render_mode="rgb_array"),
-        video_folder=f"videos/{time.time()}",
+        video_folder=f"videos/{datetime.datetime.now().isoformat()}",
         episode_trigger=lambda _: True,
         disable_logger=True,
     )
@@ -55,22 +50,20 @@ def train():
         decay=5000,
     )
 
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        trainer = Trainer(
-            envs=envs,
-            val_env=val_env,
-            epsilon=epsilon,
-            replay_buffer_path=tmpdirname,
-            device=device,
-        )
+    trainer = Trainer(
+        envs=envs,
+        val_env=val_env,
+        epsilon=epsilon,
+        device=device,
+    )
 
-        # try:
-        #     trainer.load("checkpoint")
-        #     print("Checkpoint loaded.")
-        # except FileNotFoundError:
-        #     print("Checkpoint not found. Starting from scratch.")
+    try:
+        trainer.checkpoint_manager.load()
+        print("Checkpoint loaded.")
+    except FileNotFoundError:
+        print("Checkpoint not found. Starting from scratch.")
 
-        trainer.train()
+    trainer.train()
 
 
 if __name__ == "__main__":

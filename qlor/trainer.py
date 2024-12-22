@@ -1,4 +1,5 @@
 import datetime
+import os
 import random
 import numpy as np
 import torch
@@ -26,8 +27,8 @@ class Trainer(object):
         envs,
         val_env,
         epsilon,
-        replay_buffer_path,
         device,
+        replay_buffer_path: str = "/tmp/qlor_rb/",
         hyperparameters: HyperParameters = None,
     ):
         self.envs = envs
@@ -42,7 +43,7 @@ class Trainer(object):
         self.hyperparameters = hyperparameters if hyperparameters else HyperParameters()
 
         # Training parameters
-        self.validation_frequency = 200
+        self.validation_frequency = 5000
         self.print_frequency = 100
 
         self.experience_replay = ReplayBuffer(
@@ -71,9 +72,13 @@ class Trainer(object):
             ]
         )
 
-        self.autoencoder = Autoencoder((1, 120, 160), self.hyperparameters.hidden_dim).to(device)
+        self.autoencoder = Autoencoder(
+            (1, 120, 160), self.hyperparameters.hidden_dim
+        ).to(device)
         self.agent = Agent(self.hyperparameters.hidden_dim, self.action_dim).to(device)
-        self.target_agent = Agent(self.hyperparameters.hidden_dim, self.action_dim).to(device)
+        self.target_agent = Agent(self.hyperparameters.hidden_dim, self.action_dim).to(
+            device
+        )
         self.target_agent.load_state_dict(self.agent.state_dict())
 
         self.autoencoder_optimizer = torch.optim.Adam(
@@ -270,8 +275,9 @@ class Trainer(object):
             next_q_values = target_policy_batch.gather(
                 1, next_actions.unsqueeze(1)
             ).squeeze(1)
-            target_q_values = reward_batch + self.hyperparameters.gamma * next_q_values * (
-                1 - done_batch.float()
+            target_q_values = (
+                reward_batch
+                + self.hyperparameters.gamma * next_q_values * (1 - done_batch.float())
             )
 
         return target_q_values
@@ -305,7 +311,10 @@ class Trainer(object):
         return len(self.experience_replay) > self.hyperparameters.batch_size * 2
 
     def _should_update_target_agent(self):
-        return self.step % self.hyperparameters.target_update_frequency == 0 and self.step > 0
+        return (
+            self.step % self.hyperparameters.target_update_frequency == 0
+            and self.step > 0
+        )
 
     def _should_print_metrics(self):
         return self.step % self.print_frequency == 0 and self.step > 0
@@ -315,7 +324,8 @@ class Trainer(object):
 
     def _print_metrics_if_needed(self):
         if self._should_print_metrics():
-            print(self.metrics_manager.get_string(" "))
+            print(self.metrics_manager.get_string("\n"))
+            print("*" * os.get_terminal_size().columns)
 
     def _update_target_agent_if_needed(self):
         if self._should_update_target_agent():
