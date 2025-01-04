@@ -67,8 +67,10 @@ class CheckpointManager:
         return self.trainer.experience_replay
 
     def _load_networks(self, path):
-        self.trainer.agent.load_state_dict(torch.load(path["agent"]))
-        self.trainer.autoencoder.load_state_dict(torch.load(path["autoencoder"]))
+        self.trainer.agent.load_state_dict(torch.load(path["agent"], weights_only=True))
+        self.trainer.autoencoder.load_state_dict(
+            torch.load(path["autoencoder"], weights_only=True)
+        )
         return self.trainer.agent, self.trainer.autoencoder
 
     def _load_checkpoint_by_step(self, step):
