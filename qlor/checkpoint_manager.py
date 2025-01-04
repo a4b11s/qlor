@@ -89,6 +89,10 @@ class CheckpointManager:
             for name in os.listdir(self.checkpoint_dir)
             if name.startswith("manifest_")
         ]
+
+        if len(checkpoints) < 1:
+            return
+
         latest_checkpoint = max(
             checkpoints, key=lambda x: int(x.split("_")[1].split(".")[0])
         )
