@@ -37,10 +37,14 @@ class Trainer(object):
         self.device = device
         self.epsilon: Epsilon = epsilon
         self.checkpoint_manager = CheckpointManager(
-            self, self.save_path, max_to_keep=5, save_interval=1000
+            self, self.save_path, max_to_keep=5, save_interval=50_000
         )
 
-        self.hyperparameters = hyperparameters if hyperparameters else HyperParameters()
+        self.hyperparameters = (
+            hyperparameters
+            if hyperparameters
+            else HyperParameters(experience_replay_maxlen=1_000_000)
+        )
 
         # Training parameters
         self.validation_frequency = 5000
