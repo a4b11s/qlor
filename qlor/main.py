@@ -5,6 +5,8 @@ import os
 import gymnasium
 import torch
 
+from vizdoom import gymnasium_wrapper  # This import will register all the environments
+
 from qlor.epsilon import Epsilon
 from qlor.trainer import Trainer
 
@@ -47,7 +49,7 @@ def train():
     epsilon = Epsilon(
         start=1.0,
         end=0.01,
-        decay=5000,
+        decay=100_000,
     )
 
     trainer = Trainer(
