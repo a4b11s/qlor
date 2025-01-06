@@ -1,10 +1,10 @@
 import datetime
 import os
 
-from qlor.checkpoint_manager import CheckpointManager
-from qlor.epsilon import Epsilon
-from qlor.hyperparameters import HyperParameters
-from qlor.metrics_manager import MetricsManager
+from qlor.modules.checkpoint_manager import CheckpointManager
+from qlor.modules.epsilon import Epsilon
+from qlor.modules.hyperparameters import HyperParameters
+from qlor.modules.metrics_manager import MetricsManager
 
 
 class BaseTrainer:

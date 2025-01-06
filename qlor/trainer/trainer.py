@@ -8,10 +8,10 @@ from torchvision import transforms
 from torchrl.data import ReplayBuffer, LazyMemmapStorage, SamplerWithoutReplacement
 from tensordict.tensordict import TensorDict
 
-from qlor.agent import Agent
-from qlor.autoencoder import Autoencoder
-from qlor.base_trainer import BaseTrainer
-from qlor.hyperparameters import HyperParameters
+from qlor.models.agent import Agent
+from qlor.models.autoencoder import Autoencoder
+from qlor.trainer.base_trainer import BaseTrainer
+from qlor.modules.hyperparameters import HyperParameters
 
 
 class Trainer(BaseTrainer):

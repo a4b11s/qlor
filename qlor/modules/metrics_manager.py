@@ -1,4 +1,4 @@
-from qlor.metric import Metric
+from qlor.modules.metric import Metric
 
 
 class MetricsManager:

@@ -7,8 +7,8 @@ import torch
 
 from vizdoom import gymnasium_wrapper  # This import will register all the environments
 
-from qlor.epsilon import Epsilon
-from qlor.trainer import Trainer
+from qlor.modules.epsilon import Epsilon
+from qlor.trainer.trainer import Trainer
 from qlor.utils import print_into_middle_of_terminal
 
 
@@ -66,7 +66,6 @@ def train():
     except FileNotFoundError:
         print("Checkpoint not found. Starting from scratch.")
 
-    
     print_into_middle_of_terminal("Training started")
     trainer.train()
 
