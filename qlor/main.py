@@ -9,6 +9,7 @@ from vizdoom import gymnasium_wrapper  # This import will register all the envir
 
 from qlor.epsilon import Epsilon
 from qlor.trainer import Trainer
+from qlor.utils import print_into_middle_of_terminal
 
 
 def train():
@@ -37,7 +38,7 @@ def train():
 
     val_env = gymnasium.wrappers.RecordVideo(
         gymnasium.make(env_id, render_mode="rgb_array"),
-        video_folder=f"videos/{datetime.datetime.now().isoformat()}",
+        video_folder=f"videos/{datetime.datetime.now().isoformat(" ", timespec='seconds')}",
         episode_trigger=lambda _: True,
         disable_logger=True,
     )
@@ -65,6 +66,8 @@ def train():
     except FileNotFoundError:
         print("Checkpoint not found. Starting from scratch.")
 
+    
+    print_into_middle_of_terminal("Training started")
     trainer.train()
 
 
