@@ -93,7 +93,7 @@ class CheckpointManager:
         ]
 
         if len(checkpoints) < 1:
-            return
+            raise FileNotFoundError("No checkpoints found.")
 
         latest_checkpoint = max(
             checkpoints, key=lambda x: int(x.split("_")[1].split(".")[0])
