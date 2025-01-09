@@ -5,13 +5,12 @@ import numpy as np
 import torch
 
 from torchvision import transforms
-from torchrl.data import ReplayBuffer, LazyMemmapStorage, SamplerWithoutReplacement
-from tensordict.tensordict import TensorDict
 
 from qlor.models.agent import Agent
 from qlor.models.autoencoder import Autoencoder
 from qlor.trainer.base_trainer import BaseTrainer
 from qlor.modules.hyperparameters import HyperParameters
+from qlor.replay_buffer.replay_buffer import ReplayBuffer
 
 
 class Trainer(BaseTrainer):
@@ -33,22 +32,20 @@ class Trainer(BaseTrainer):
             device=device,
             hyperparameters=hyperparameters,
         )
-
-        self.experience_replay = ReplayBuffer(
-            storage=LazyMemmapStorage(
-                max_size=self.hyperparameters.experience_replay_maxlen,
-                scratch_dir=replay_buffer_path,
-            ),
-            batch_size=self.hyperparameters.batch_size,
-            prefetch=4,
-            sampler=SamplerWithoutReplacement(),
-        )
-
         self.transform = transforms.Compose(
             [
                 transforms.Grayscale(),
                 transforms.Resize((120, 160)),
             ]
+        )
+
+        self.replay_buffer = ReplayBuffer(
+            max_size=self.hyperparameters.experience_replay_maxlen,
+            batch_size=self.hyperparameters.batch_size,
+            prefetch=4,
+            replay_buffer_path=replay_buffer_path,
+            num_envs=envs.num_envs,
+            device=device,
         )
 
         self.autoencoder = Autoencoder(
@@ -68,19 +65,11 @@ class Trainer(BaseTrainer):
         self.autoencoder_loss = torch.nn.MSELoss()
         self.env_model_loss = torch.nn.MSELoss()
 
-    def sample_batch(self, batch_size=None):
-        if batch_size is None:
-            batch_size = self.hyperparameters.batch_size
-
-        batch = self.experience_replay.sample(batch_size).to(self.device)
-
-        return batch
-
     def autoencoder_train_step(self, batch_size=None):
         loss = []
 
         for _ in range(self.hyperparameters.autoencoder_extra_steps):
-            batch = self.sample_batch(batch_size)
+            batch = self.replay_buffer.sample_batch(batch_size)
             state_batch = batch["observation"]
             step_loss = self.autoencoder.train_on_batch(
                 state_batch=state_batch,
@@ -92,7 +81,7 @@ class Trainer(BaseTrainer):
         return np.mean(loss)
 
     def agent_train_step(self, batch_size=None):
-        batch = self.sample_batch(batch_size)
+        batch = self.replay_buffer.sample_batch(batch_size)
 
         state_batch = batch["observation"]
         action_batch = batch["action"]
@@ -128,7 +117,7 @@ class Trainer(BaseTrainer):
             policy = self.agent(encoded_state)
             actions = self.epsilon_greedy_action(policy, self.epsilon())
             next_observations, rewards, done_flags = self.execute_actions(actions)
-            self.store_experience(
+            self.replay_buffer.store_experience(
                 current_state=current_state,
                 next_observations=next_observations,
                 actions=actions,
@@ -186,29 +175,6 @@ class Trainer(BaseTrainer):
         next_observations = self.augment_observation(next_observations)
 
         return next_observations, rewards, terminateds | truncateds
-
-    def store_experience(
-        self, current_state, next_observations, actions, rewards, done_flags
-    ):
-        data_dict = self.create_data_dict(
-            current_state, next_observations, actions, rewards, done_flags
-        )
-        self.experience_replay.extend(data_dict)
-
-    def create_data_dict(
-        self, current_state, next_observations, actions, rewards, done_flags
-    ):
-        return TensorDict(
-            {
-                "observation": current_state,
-                "next_observation": next_observations,
-                "action": torch.tensor(actions),
-                "rewards": torch.tensor(rewards, dtype=torch.float32),
-                "done": torch.tensor(done_flags),
-            },
-            device=self.device,
-            batch_size=self.envs.num_envs,
-        )
 
     def validate(self, max_steps=1000):
         observation, _ = self.val_env.reset()
@@ -270,7 +236,7 @@ class Trainer(BaseTrainer):
         return self.step % self.hyperparameters.autoencoder_update_frequency == 0
 
     def _should_train_agent(self):
-        return len(self.experience_replay) > self.hyperparameters.batch_size * 2
+        return len(self.replay_buffer) > self.hyperparameters.batch_size * 2
 
     def _should_update_target_agent(self):
         return (
