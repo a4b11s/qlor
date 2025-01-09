@@ -8,6 +8,7 @@ class HyperParameters:
         autoencoder_update_frequency: int = 100,
         target_update_frequency: int = 1000,
         experience_replay_maxlen: int = 2_000_000,
+        screen_stack_depth = 4,
     ) -> None:
         """
         Initializes the hyperparameters.
@@ -19,6 +20,7 @@ class HyperParameters:
         :param autoencoder_update_frequency: The frequency of updating the autoencoder.
         :param target_update_frequency: The frequency of updating the target network.
         :param experience_replay_maxlen: The maximum length of the experience replay buffer.
+        :screen_stack_depth: The number of frames to stack.
         """
 
         self.hidden_dim = hidden_dim
@@ -28,6 +30,7 @@ class HyperParameters:
         self.autoencoder_update_frequency = autoencoder_update_frequency
         self.target_update_frequency = target_update_frequency
         self.experience_replay_maxlen = experience_replay_maxlen
+        self.screen_stack_depth = screen_stack_depth
 
     def get_config(self) -> dict:
         """
@@ -44,6 +47,7 @@ class HyperParameters:
             "autoencoder_update_frequency": self.autoencoder_update_frequency,
             "target_update_frequency": self.target_update_frequency,
             "experience_replay_maxlen": self.experience_replay_maxlen,
+            "screen_stack_depth": self.screen_stack_depth,
         }
 
     def set_config(self, config: dict) -> None:
@@ -60,6 +64,7 @@ class HyperParameters:
         self.autoencoder_update_frequency = config["autoencoder_update_frequency"]
         self.target_update_frequency = config["target_update_frequency"]
         self.experience_replay_maxlen = config["experience_replay_maxlen"]
+        self.screen_stack_depth = config["screen_stack_depth"]
 
     def __str__(self) -> str:
         return f"HyperParameters(hidden_dim={self.hidden_dim}, batch_size={self.batch_size}, gamma={self.gamma}, autoencoder_extra_steps={self.autoencoder_extra_steps}, autoencoder_update_frequency={self.autoencoder_update_frequency}, target_update_frequency={self.target_update_frequency}, experience_replay_maxlen={self.experience_replay_maxlen})"

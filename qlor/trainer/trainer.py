@@ -8,6 +8,7 @@ from torchvision import transforms
 
 from qlor.models.agent import Agent
 from qlor.models.autoencoder import Autoencoder
+from qlor.modules.tensor_stack import TensorStack
 from qlor.trainer.base_trainer import BaseTrainer
 from qlor.modules.hyperparameters import HyperParameters
 from qlor.replay_buffer.replay_buffer import ReplayBuffer
@@ -49,7 +50,8 @@ class Trainer(BaseTrainer):
         )
 
         self.autoencoder = Autoencoder(
-            (1, 120, 160), self.hyperparameters.hidden_dim
+            (self.hyperparameters.screen_stack_depth, 120, 160),
+            self.hyperparameters.hidden_dim,
         ).to(device)
         self.agent = Agent(self.hyperparameters.hidden_dim, self.action_dim).to(device)
         self.target_agent = Agent(self.hyperparameters.hidden_dim, self.action_dim).to(
@@ -64,6 +66,12 @@ class Trainer(BaseTrainer):
         self.criterion = torch.nn.MSELoss()
         self.autoencoder_loss = torch.nn.MSELoss()
         self.env_model_loss = torch.nn.MSELoss()
+
+        self.screen_stack = TensorStack(
+            stack_depth=self.hyperparameters.screen_stack_depth,
+            batch_size=envs.num_envs,
+            screen_shape=(1, 120, 160),
+        )
 
     def autoencoder_train_step(self, batch_size=None):
         loss = []
@@ -110,16 +118,20 @@ class Trainer(BaseTrainer):
         loss = 0
 
         observation = self.augment_observation(observation)  # bschw
+        done_flags = torch.zeros(len(observation), device=self.device, dtype=torch.bool)
+        self.screen_stack.clear()
+        self.screen_stack.add_batch(observation, done_flags)
 
         while self.step < max_steps:
-            current_state = observation
+            current_state = self.screen_stack.get()
             encoded_state = self.autoencoder.encoder(current_state)
             policy = self.agent(encoded_state)
             actions = self.epsilon_greedy_action(policy, self.epsilon())
             next_observations, rewards, done_flags = self.execute_actions(actions)
+            self.screen_stack.add_batch(next_observations, done_flags)
             self.replay_buffer.store_experience(
                 current_state=current_state,
-                next_observations=next_observations,
+                next_observations=self.screen_stack.get(),
                 actions=actions,
                 rewards=rewards,
                 done_flags=done_flags,
@@ -131,9 +143,7 @@ class Trainer(BaseTrainer):
             if self._should_train_autoencoder():
                 autoencoder_loss = self.autoencoder_train_step()
 
-            observation = next_observations
-
-            if np.any(done_flags):
+            if done_flags.any():
                 self.episode += 1
 
             self.on_step_end(
@@ -174,7 +184,12 @@ class Trainer(BaseTrainer):
         next_observations, rewards, terminateds, truncateds, _ = self.envs.step(actions)
         next_observations = self.augment_observation(next_observations)
 
-        return next_observations, rewards, terminateds | truncateds
+        dones_flags = terminateds | truncateds
+        dones_flags = torch.tensor(
+            dones_flags, device=self.device, dtype=torch.bool
+        ).squeeze()
+
+        return next_observations, rewards, dones_flags
 
     def validate(self, max_steps=1000):
         observation, _ = self.val_env.reset()
