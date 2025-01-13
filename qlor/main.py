@@ -8,6 +8,7 @@ import torch
 from vizdoom import gymnasium_wrapper  # This import will register all the environments
 
 from qlor.modules.epsilon import Epsilon
+from qlor.modules.hyperparameters import HyperParameters
 from qlor.trainer.trainer import Trainer
 from qlor.utils import print_into_middle_of_terminal
 
@@ -47,7 +48,7 @@ def train():
 
     envs = gymnasium.make_vec(
         env_id,
-        num_envs=32,
+        num_envs=16,
     )
 
     val_env = gymnasium.wrappers.RecordVideo(
@@ -67,12 +68,17 @@ def train():
         end=0.01,
         decay=100_000,
     )
+    
+    hp = HyperParameters(
+        experience_replay_maxlen=800_000,
+    )
 
     trainer = Trainer(
         envs=envs,
         val_env=val_env,
         epsilon=epsilon,
         device=device,
+        hyperparameters=hp,
     )
 
     try:
