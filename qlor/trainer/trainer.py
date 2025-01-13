@@ -72,6 +72,11 @@ class Trainer(BaseTrainer):
             batch_size=envs.num_envs,
             screen_shape=(1, 120, 160),
         )
+        self.val_screen_stack = TensorStack(
+            stack_depth=self.hyperparameters.screen_stack_depth,
+            batch_size=1,
+            screen_shape=(1, 120, 160),
+        )
 
     def autoencoder_train_step(self, batch_size=None):
         loss = []
@@ -193,15 +198,22 @@ class Trainer(BaseTrainer):
 
     def validate(self, max_steps=1000):
         observation, _ = self.val_env.reset()
+        self.val_screen_stack.clear()
+        observation = self.augment_observation(observation)
+        done_flags = torch.zeros(len(observation), device=self.device, dtype=torch.bool)
+        self.val_screen_stack.add_batch(observation, done_flags)
+
         rewards = []
 
         while len(rewards) < max_steps:
-            current_state = self.augment_observation(observation)
+            current_state = self.val_screen_stack.get()
             hidden_state = self.autoencoder.encoder(current_state)
             policy = self.agent(hidden_state)
             actions = policy.argmax(dim=1).item()
 
             observation, reward, terminated, truncated, _ = self.val_env.step(actions)
+            observation = self.augment_observation(observation)
+            self.val_screen_stack.add_batch(observation, done_flags)
 
             rewards.append(reward)
 
