@@ -43,7 +43,7 @@ class Trainer(BaseTrainer):
         self.replay_buffer = ReplayBuffer(
             max_size=self.hyperparameters.experience_replay_maxlen,
             batch_size=self.hyperparameters.batch_size,
-            prefetch=4,
+            prefetch=24,
             replay_buffer_path=replay_buffer_path,
             num_envs=envs.num_envs,
             device=device,
